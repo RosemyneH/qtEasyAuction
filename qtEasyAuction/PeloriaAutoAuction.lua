@@ -81,6 +81,9 @@ local function ShouldPost(link, bag, slot)
 
     if itemType == "Quest" then return false end
 
+    local lowerName = string.lower(itemName)
+    if string.find(lowerName, "hearthstone", 1, true) then return false end
+
     if itemSubType == "Junk" then return true end
 
     local state = BagItemState(bag, slot)
