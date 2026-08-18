@@ -2,7 +2,7 @@
 ## Title: qtEasyAuction
 ## Notes: Auto-post items to Peloria AH with soulbind filtering
 ## Author: Qt
-## Version: 1.1
+## Version: 1.2
 ## SavedVariables: qtEasyAuctionDB
 
 PeloriaAutoAuction.lua
