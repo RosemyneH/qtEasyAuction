@@ -61,6 +61,47 @@ local function Coherent(s)
     return true
 end
 
+local TRADESMAN_TOOL_IDS = {
+    [5956] = true,   -- Blacksmith Hammer
+    [2901] = true,   -- Mining Pick
+    [7005] = true,   -- Skinning Knife
+    [6219] = true,   -- Arclight Spanner
+    [9149] = true,   -- Philosopher's Stone
+    [10498] = true,  -- Gyromatic Micro-Adjustor
+    [40772] = true,  -- Gnomish Army Knife
+    [20815] = true,  -- Jeweler's Kit
+    [39505] = true,  -- Virtuoso Inking Set
+    [40892] = true,  -- Hammer Pick
+    [40893] = true,  -- Bladed Pickaxe
+    [6218] = true,   -- Runed Copper Rod
+    [6339] = true,   -- Runed Silver Rod
+    [11130] = true,  -- Runed Golden Rod
+    [11145] = true,  -- Runed Truesilver Rod
+    [16207] = true,  -- Runed Arcanite Rod
+    [22461] = true,  -- Runed Fel Iron Rod
+    [22462] = true,  -- Runed Adamantite Rod
+    [22463] = true,  -- Runed Eternium Rod
+    [44452] = true,  -- Runed Titanium Rod
+}
+
+local function ItemIDFromLink(link)
+    if not link then return nil end
+    return tonumber(string.match(link, "item:(%d+)"))
+end
+
+local function IsTradesmanTool(link, itemName)
+    local itemID = ItemIDFromLink(link)
+    if itemID and TRADESMAN_TOOL_IDS[itemID] then return true end
+
+    if not itemName then return false end
+    local lower = string.lower(itemName)
+    if string.find(lower, "runed", 1, true) and string.find(lower, " rod", 1, true) then
+        return true
+    end
+
+    return false
+end
+
 local function BagItemState(b, s)
     scanner:SetOwner(UIParent, "ANCHOR_NONE")
     scanner:ClearLines()
@@ -83,6 +124,8 @@ local function ShouldPost(link, bag, slot)
 
     local lowerName = string.lower(itemName)
     if string.find(lowerName, "hearthstone", 1, true) then return false end
+
+    if IsTradesmanTool(link, itemName) then return false end
 
     if itemSubType == "Junk" then return true end
 
