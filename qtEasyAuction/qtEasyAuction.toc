@@ -1,0 +1,12 @@
+## Interface: 30300
+## Title: qtEasyAuction
+## Notes: Cute Peloria AH skin, soulbind deals, auto-post
+## Author: Qt
+## Version: 1.5
+## SavedVariables: qtEasyAuctionDB
+## SavedVariablesPerCharacter: qtEasyAuctionCharDB
+
+PeloriaSkin.lua
+PeloriaAutoAuction.lua
+PeloriaDeals.lua
+PeloriaAuctions.lua
