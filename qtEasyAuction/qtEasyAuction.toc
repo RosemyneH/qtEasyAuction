@@ -2,7 +2,7 @@
 ## Title: qtEasyAuction
 ## Notes: Cute Peloria AH skin, soulbind deals, auto-post
 ## Author: Qt
-## Version: 1.5
+## Version: 2.0 Beta 1
 ## SavedVariables: qtEasyAuctionDB
 ## SavedVariablesPerCharacter: qtEasyAuctionCharDB
 
