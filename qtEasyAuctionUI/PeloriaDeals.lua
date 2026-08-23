@@ -1460,12 +1460,69 @@ local function MassStats(list)
     return stats, copper, score
 end
 
+function PaintSweepGold()
+    if not S.sweep then
+        HideSweepGold()
+        return
+    end
+    if not D.sweepGold then
+        local f = CreateFrame("Frame", nil, UIParent)
+        f:SetFrameStrata("TOOLTIP")
+        f:SetFrameLevel(128)
+        f:SetWidth(180)
+        f:SetHeight(18)
+        f:EnableMouse(false)
+        local fs = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        fs:SetPoint("LEFT", 0, 0)
+        fs:SetJustifyH("LEFT")
+        local font, size = fs:GetFont()
+        if font then fs:SetFont(font, size or 12, "OUTLINE") end
+        D.sweepGoldFs = fs
+        D.sweepGold = f
+    end
+    local _, copper = MassStats(S.sweepOrder)
+    local have = GoldTotal()
+    local left = have - copper
+    local pal = _G.qtEasyAuctionSkin and _G.qtEasyAuctionSkin.C and _G.qtEasyAuctionSkin.C()
+    local fs = D.sweepGoldFs
+    if left >= 0 then
+        fs:SetText("after  " .. GoldText(left))
+        local g = pal and pal.gold or { 1, 0.84, 0.45 }
+        fs:SetTextColor(g[1], g[2], g[3])
+    else
+        fs:SetText("short  " .. GoldText(copper - have))
+        fs:SetTextColor(1, 0.45, 0.4)
+    end
+    local x, y = GetCursorPosition()
+    local scale = UIParent:GetEffectiveScale() or 1
+    D.sweepGold:ClearAllPoints()
+    D.sweepGold:SetPoint("LEFT", UIParent, "BOTTOMLEFT", (x / scale) + 18, y / scale)
+    D.sweepGold:Show()
+end
+
 function PaintMassGoldWarn()
-    if not D.massWarn or not S.massList then return end
+    if not S.massList then return end
     local _, copper = MassStats(S.massList)
     local have = GoldTotal()
+    local left = have - copper
+    local pal = _G.qtEasyAuctionSkin and _G.qtEasyAuctionSkin.C and _G.qtEasyAuctionSkin.C()
+    if D.massHave then
+        if left >= 0 then
+            D.massHave:SetText("You have  " .. GoldText(have) .. "   ·   after buying  " .. GoldText(left))
+            if pal and pal.cream then
+                D.massHave:SetTextColor(pal.cream[1], pal.cream[2], pal.cream[3])
+            else
+                D.massHave:SetTextColor(0.95, 0.90, 0.82)
+            end
+        else
+            D.massHave:SetText("You have  " .. GoldText(have) .. "   ·   after buying  0g")
+            D.massHave:SetTextColor(1, 0.45, 0.4)
+        end
+        D.massHave:Show()
+    end
+    if not D.massWarn then return end
     if have < copper then
-        D.massWarn:SetText("You have " .. GoldText(have) .. "  ·  short " .. GoldText(copper - have))
+        D.massWarn:SetText("Short  " .. GoldText(copper - have))
         D.massWarn:Show()
     else
         D.massWarn:SetText("")
@@ -1592,7 +1649,7 @@ local function EnsureMassConfirm()
     local parent = host or UIParent
     local f = CreateFrame("Frame", "qtEasyAuctionMassBuy", parent)
     f:SetWidth(360)
-    f:SetHeight(220)
+    f:SetHeight(236)
     f:SetPoint("CENTER", 0, 40)
     f:SetFrameStrata("TOOLTIP")
     f:SetFrameLevel((parent:GetFrameLevel() or 1) + 80)
@@ -1619,8 +1676,11 @@ local function EnsureMassConfirm()
     local cost = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     cost:SetPoint("TOP", title, "BOTTOM", 0, -10)
     D.massCost = cost
+    local have = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    have:SetPoint("TOP", cost, "BOTTOM", 0, -6)
+    D.massHave = have
     local score = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    score:SetPoint("TOP", cost, "BOTTOM", 0, -6)
+    score:SetPoint("TOP", have, "BOTTOM", 0, -6)
     D.massScore = score
     local stats = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     stats:SetPoint("TOP", score, "BOTTOM", 0, -12)
@@ -1675,8 +1735,8 @@ local function ShowMassConfirm(list)
     D.massCost:SetText("Cost  " .. Commas(GoldRaw(copper)) .. "g   ·   " .. GoldText(copper))
     D.massScore:SetText("Score gain  +" .. Compact(score))
     D.massStats:SetText(MassStatText(stats))
-    PaintMassGoldWarn()
     PaintMassConfirm()
+    PaintMassGoldWarn()
     f:SetFrameStrata("TOOLTIP")
     f:SetToplevel(true)
     f:EnableMouse(true)
