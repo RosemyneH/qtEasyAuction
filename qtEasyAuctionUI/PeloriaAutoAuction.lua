@@ -6,9 +6,17 @@ local hidePreviewAt = 0
 
 local DB
 
-print("|cff00ff00qtEasyAuction loaded!|r")
-
-local scanner = CreateFrame("GameTooltip", "PeloriaAutoAuctionScanner", nil, "GameTooltipTemplate")
+local scanner
+local function Scanner()
+    if not scanner then
+        scanner = CreateFrame("GameTooltip", "PeloriaAutoAuctionScanner", nil, "GameTooltipTemplate")
+        scanner:SetOwner(UIParent, "ANCHOR_NONE")
+    end
+    if _G.PeloriaRegisterItemTooltip and not scanner.__PeloriaItemTooltipRegistered then
+        _G.PeloriaRegisterItemTooltip(scanner)
+    end
+    return scanner
+end
 
 local function AccountDB()
     qtEasyAuctionDB = qtEasyAuctionDB or {}
@@ -34,7 +42,8 @@ local function LoadDB()
     DB.weights = DB.weights or {}
     if DB.scorePrice == nil then DB.scorePrice = false end
     if DB.ratioPrice == nil then DB.ratioPrice = true end
-    if DB.goldValue == nil then DB.goldValue = 55 end
+    if DB.goldValue == nil then DB.goldValue = 40 end
+    if DB.goldValue == 55 then DB.goldValue = 40 end
     if DB.ratioPrice then DB.scorePrice = false end
     if DB.postBindable == nil then DB.postBindable = false end
     if not DB.priceMax then DB.priceMax = 3000000 end
@@ -130,6 +139,11 @@ local function MythicFromLines(lines)
             local raw = string.match(low, "mythic%s*%+%s*([%d%.,]+%s*[km]?)")
             local n = ParseGold(raw)
             if n and n > 0 then return n end
+            if raw then
+                raw = string.gsub(raw, "[,%s]", "")
+                n = tonumber(raw)
+                if n and n > 0 then return math.floor(n + 0.5) end
+            end
         end
     end
     return nil
@@ -171,14 +185,17 @@ local function BagItemState(b, s, link)
     local key = b * 100 + s
     local hit = stateCache[key]
     if hit and hit.link == link then return hit.state end
-    scanner:SetOwner(UIParent, "ANCHOR_NONE")
-    scanner:ClearLines()
-    if not pcall(scanner.SetBagItem, scanner, b, s) then return {} end
-    if scanner:NumLines() == 0 then return {} end
-    local lines = ReadTooltipLines(scanner)
+    local tip = Scanner()
+    tip:SetOwner(UIParent, "ANCHOR_NONE")
+    tip:ClearLines()
+    if not pcall(tip.SetBagItem, tip, b, s) then return {} end
+    if tip:NumLines() == 0 then return {} end
+    local lines = ReadTooltipLines(tip)
     local state = StateFromLines(lines)
-    if not Coherent(state) then return {} end
     state.mythic = MythicFromLines(lines)
+    if not Coherent(state) then
+        return { mythic = state.mythic, classBlocked = state.classBlocked, known = true }
+    end
     stateCache[key] = { link = link, state = state }
     return state
 end
@@ -242,10 +259,15 @@ end
 
 local bagItems
 local bagSoon = 0
-local listBusy = false
+local listBusy, listDirty = false, false
+local POST_BATCH, POST_TICK = 64, 0.1
+local postJobs, postIdx, postWait, postSent, postRet, postHow
+local postPump = CreateFrame("Frame", nil, UIParent)
+postPump:Hide()
 
 local function InvalidateBags()
     bagItems = nil
+    stateCache = {}
 end
 
 local function Items()
@@ -257,9 +279,6 @@ local SENTINEL_BASE, SENTINEL_MAX = 20000, 60020000
 local PriceGold
 
 local function AffixFromLink(link)
-    if PeloriaItemHelper and PeloriaItemHelper.AffixForLink then
-        return PeloriaItemHelper.AffixForLink(link) or 0
-    end
     if not link then return 0 end
     local _, _, _, _, _, _, suffix =
         string.match(link, "item:(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+)")
@@ -269,30 +288,115 @@ local function AffixFromLink(link)
     return suffix
 end
 
+local function MythicFromLink(link)
+    if not link then return nil end
+    local _, _, _, _, _, prism, suffix, _, renderLevel =
+        string.match(link, "item:(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+)")
+    prism = tonumber(prism)
+    if prism and prism > SENTINEL_BASE and prism <= SENTINEL_MAX then
+        return prism - SENTINEL_BASE
+    end
+    renderLevel = tonumber(renderLevel)
+    if renderLevel and renderLevel > SENTINEL_BASE and renderLevel <= SENTINEL_MAX then
+        return renderLevel - SENTINEL_BASE
+    end
+    suffix = tonumber(suffix)
+    if suffix and suffix <= -(SENTINEL_BASE + 1) and suffix >= -SENTINEL_MAX then
+        return -suffix - SENTINEL_BASE
+    end
+end
+
 local function MythicFor(bag, slot, link)
-    local v
-    if PeloriaItemHelper and PeloriaItemHelper.MythicForBagSlot then
-        v = PeloriaItemHelper.MythicForBagSlot(bag, slot)
-        if v and v > 0 then return v end
-    end
-    if PeloriaItemHelper and PeloriaItemHelper.MythicFromLink then
-        v = PeloriaItemHelper.MythicFromLink(link)
-        if v and v > 0 then return v end
-    end
+    local D = _G.qtEasyAuctionDeals
+    local v = D and D.BagMythic and D.BagMythic(bag, slot)
+    if v and v > 0 then return v end
+    v = MythicFromLink(link)
+    if v and v > 0 then return v end
+    stateCache[(bag or 0) * 100 + (slot or 0)] = nil
     local state = BagItemState(bag, slot, link)
     if state and state.mythic and state.mythic > 0 then return state.mythic end
     return 0
 end
 
+local scoreWarned
+
 function FillItemScore(item)
     local D = _G.qtEasyAuctionDeals
     if not D or not D.PrimeAndScore then
         item.score, item.scoreReady = 0, false
+        if not scoreWarned then
+            scoreWarned = true
+            print("|cffff5555qtEasyAuction:|r Post score unavailable — /reload if Deals failed to load.")
+        end
         return
     end
     local level = MythicFor(item.bag, item.slot, item.link)
+    if (not level or level <= 0) and D.MythicReady and not D.MythicReady() then
+        item.score, item.scoreReady = 0, false
+        return
+    end
     local affix = AffixFromLink(item.link)
-    item.score, item.scoreReady = D.PrimeAndScore(item.itemID, level, affix)
+    local ok, score, ready = pcall(D.PrimeAndScore, item.itemID, level or 0, affix)
+    if not ok then
+        if not scoreWarned then
+            scoreWarned = true
+            print("|cffff5555qtEasyAuction:|r post score: " .. tostring(score))
+        end
+        item.score, item.scoreReady = 0, true
+        return
+    end
+    item.score, item.scoreReady = score or 0, ready and true or false
+end
+
+local function RescoreItem(item)
+    if not item or not item.itemID then return end
+    local D = _G.qtEasyAuctionDeals
+    local level = MythicFor(item.bag, item.slot, item.link)
+    if D and D.ClearAsk then
+        D.ClearAsk(item.itemID, level, AffixFromLink(item.link))
+    end
+    item.score, item.scoreReady = 0, false
+    FillItemScore(item)
+    if RefreshPostList then RefreshPostList() end
+    EnsureTick()
+end
+
+RescoreMissing = function()
+    stateCache = {}
+    local items = Items()
+    local D = _G.qtEasyAuctionDeals
+    for i = 1, #items do
+        local it = items[i]
+        if not it.scoreReady or (it.score or 0) <= 0 then
+            if D and D.ClearAsk then
+                D.ClearAsk(it.itemID, MythicFor(it.bag, it.slot, it.link), AffixFromLink(it.link))
+            end
+            it.score, it.scoreReady = 0, false
+        end
+    end
+    if RefreshPostList then RefreshPostList() end
+    EnsureTick()
+end
+
+local function ShowItemTip(owner, bag, slot, itemID, link, anchor)
+    if not bag then return end
+    local level = MythicFor(bag, slot, link)
+    PeloriaSoulbindHoverLevel = (level > 0) and level or nil
+    GameTooltip:SetOwner(owner, anchor or "ANCHOR_RIGHT")
+    GameTooltip:SetBagItem(bag, slot)
+    local D = _G.qtEasyAuctionDeals
+    if D and D.AddPreviewToTip then
+        D.AddPreviewToTip(GameTooltip, itemID, level, AffixFromLink(link))
+    end
+    GameTooltip:Show()
+    owner.tipAnchor = anchor or "ANCHOR_RIGHT"
+    PAA.hover = owner
+end
+
+local function HideItemTip()
+    PAA.hover = nil
+    PeloriaSoulbindHoverLevel = nil
+    GameTooltip:Hide()
 end
 
 local function ParseRatio(text)
@@ -304,7 +408,7 @@ local function ParseRatio(text)
 end
 
 local function FormatRatio(n)
-    n = tonumber(n) or 55
+    n = tonumber(n) or 40
     if n == math.floor(n) then return tostring(n) end
     return string.format("%.1f", n)
 end
@@ -317,7 +421,7 @@ local function GoldValue()
             return n
         end
     end
-    return (DB and DB.goldValue) or 55
+    return (DB and DB.goldValue) or 40
 end
 
 -- ʕ •ᴥ•ʔ✿ buyout = weighted score / gold-value ✿ ʕ •ᴥ•ʔ
@@ -358,6 +462,38 @@ local function ItemPrice(item)
         return GoldValuePrice(type(item) == "table" and item or nil)
     end
     return PriceGold()
+end
+
+-- ʕ •ᴥ•ʔ✿ bag buyout if every listing sells ✿ ʕ •ᴥ•ʔ
+local function BagBuyout(items)
+    items = items or Items()
+    local gold, n, pending = 0, 0, 0
+    for i = 1, #items do
+        local it = items[i]
+        local p = ItemPrice(it)
+        if p and p >= 1 then
+            gold = gold + p
+            n = n + 1
+        elseif not it.scoreReady then
+            pending = pending + 1
+        end
+    end
+    return gold, n, pending
+end
+
+local function PaintBagSum(items)
+    if not PAA.sum then return end
+    local gold, n, pending = BagBuyout(items)
+    if n <= 0 and pending <= 0 then
+        PAA.sum:SetText("—")
+    elseif n <= 0 then
+        PAA.sum:SetText("...")
+    else
+        local t = n .. " · " .. FormatGold(gold) .. "g"
+        if pending > 0 then t = t .. "..." end
+        PAA.sum:SetText(t)
+    end
+    PAA.sumGold, PAA.sumN, PAA.sumPending = gold, n, pending
 end
 
 local function SortName(item)
@@ -421,8 +557,28 @@ local RefreshPreview
 local RefreshPostList
 local RefreshPostHeads
 local EnsureTick
+local RescoreMissing
 
--- ʕ ● ᴥ ●ʔ✿ fire every PELAH^SELL in one frame — no SOLD wait ✿ ʕ ● ᴥ ●ʔ
+local function AskMythicBags()
+    local D = _G.qtEasyAuctionDeals
+    if D and D.AskMythicBags then
+        D.AskMythicBags(function()
+            InvalidateBags()
+            if RefreshPostList then RefreshPostList() end
+        end)
+    end
+end
+
+local function SetPostLabel(text)
+    if not PAA.button then return end
+    if PAA.button.label then
+        PAA.button.label:SetText(text)
+    else
+        PAA.button:SetText(text)
+    end
+end
+
+-- ʕ ● ᴥ ●ʔ✿ 64 SELL packets per 0.1s — server packet cap ✿ ʕ ● ᴥ ●ʔ
 local function SendSell(b, s, stack, stacks, copper, ret)
     if type(PeloriaSend) ~= "function" then return false end
     return pcall(PeloriaSend, string.format(
@@ -430,7 +586,65 @@ local function SendSell(b, s, stack, stacks, copper, ret)
         PREFIX, b, s, stack, stacks, copper, ret))
 end
 
+local function FinishPost()
+    local sent = postSent or 0
+    postJobs, postIdx, postWait = nil, 1, 0
+    postPump:Hide()
+    SetPostLabel("Post All")
+    if sent == 0 then
+        print("|cffff0000PeloriaAuto:|r PeloriaSend failed — stand near an auctioneer.")
+        return
+    end
+    print("|cff00ff00PeloriaAuto:|r Sent " .. sent .. " listing(s). " .. (postHow or "") .. ".")
+end
+
+local function PumpPost()
+    local jobs = postJobs
+    if not jobs then return false end
+    local n = 0
+    while n < POST_BATCH and postIdx <= #jobs do
+        local job = jobs[postIdx]
+        postIdx = postIdx + 1
+        n = n + 1
+        if job and SendSell(job.bag, job.slot, job.stack, 1, job.copper, postRet) then
+            postSent = postSent + 1
+            if _G.qtEasyAuctionSales and _G.qtEasyAuctionSales.NotePost then
+                _G.qtEasyAuctionSales.NotePost(job.name, job.copper)
+            end
+            -- ʕ ● ᴥ ●ʔ✿ pin last buyout on legendaries ✿ ʕ ● ᴥ ●ʔ
+            if (job.quality or 0) >= 5 then
+                SaveItemPrice(job.itemID, job.gold)
+            end
+        end
+    end
+    if postIdx > #jobs then
+        FinishPost()
+        return false
+    end
+    SetPostLabel(postIdx .. "/" .. #jobs)
+    return true
+end
+
+postPump:SetScript("OnUpdate", function(self, delta)
+    if not postJobs then
+        self:Hide()
+        return
+    end
+    postWait = (postWait or 0) + (delta or 0)
+    if postWait < POST_TICK then return end
+    postWait = 0
+    local ok, more = pcall(PumpPost)
+    if not ok then
+        print("|cffff0000PeloriaAuto:|r Post failed — " .. tostring(more))
+        FinishPost()
+    end
+end)
+
 local function Start()
+    if postJobs then
+        print("|cffffff00PeloriaAuto:|r Already posting " .. (postIdx - 1) .. "/" .. #postJobs .. ".")
+        return
+    end
     if type(PeloriaSend) ~= "function" then
         print("|cffff0000PeloriaAuto:|r PeloriaSend not found. Open the Peloria AH first.")
         return
@@ -451,42 +665,43 @@ local function Start()
         return
     end
 
-    local ret = ReturnFlag()
-    local sent, skipped = 0, 0
+    local jobs = {}
     for i = 1, #items do
         local item = items[i]
         local gold = ItemPrice(item)
-        if not gold or gold < 1 then
-            skipped = skipped + 1
-        else
-            local copper = gold * 10000
+        if gold and gold >= 1 then
             local maxStack = select(8, GetItemInfo(item.link)) or 1
-            local stack = math.min(item.count or 1, maxStack)
-            if SendSell(item.bag, item.slot, stack, 1, copper, ret) then
-                sent = sent + 1
-                -- ʕ ● ᴥ ●ʔ✿ pin last buyout on legendaries ✿ ʕ ● ᴥ ●ʔ
-                if (item.quality or 0) >= 5 then
-                    SaveItemPrice(item.itemID, gold)
-                end
-            end
+            jobs[#jobs + 1] = {
+                bag = item.bag,
+                slot = item.slot,
+                stack = math.min(item.count or 1, maxStack),
+                copper = gold * 10000,
+                gold = gold,
+                itemID = item.itemID,
+                name = item.name,
+                quality = item.quality,
+            }
         end
     end
-
-    if sent == 0 then
-        if skipped > 0 then
-            print("|cffffff00PeloriaAuto:|r No scored items to post.")
-        else
-            print("|cffff0000PeloriaAuto:|r PeloriaSend failed — stand near an auctioneer.")
-        end
+    if #jobs == 0 then
+        print("|cffffff00PeloriaAuto:|r No scored items to post.")
         return
     end
-    local how
-    if DB.ratioPrice then
-        how = "gold value " .. FormatRatio(GoldValue()) .. "/g"
-    else
-        how = "simple " .. FormatGold(PriceGold()) .. "g"
+
+    local bagGold = 0
+    for i = 1, #jobs do
+        bagGold = bagGold + (jobs[i].gold or 0)
     end
-    print("|cff00ff00PeloriaAuto:|r Sent " .. sent .. " listing(s). " .. how .. ".")
+    if DB.ratioPrice then
+        postHow = "gold value " .. FormatRatio(GoldValue()) .. "/g"
+    else
+        postHow = "simple " .. FormatGold(PriceGold()) .. "g"
+    end
+    -- ʕノ•ᴥ•ʔノ first 64 leave on the next tick, not inside the click ✿ ʕノ•ᴥ•ʔノ
+    postJobs, postIdx, postSent, postWait, postRet = jobs, 1, 0, POST_TICK, ReturnFlag()
+    SetPostLabel("1/" .. #jobs)
+    print("|cff00ff00PeloriaAuto:|r Posting " .. #jobs .. " listing(s)  ·  " .. FormatGold(bagGold) .. "g. " .. postHow .. ".")
+    postPump:Show()
 end
 
 local BACKDROP = {
@@ -508,7 +723,7 @@ end
 
 local function HidePreview()
     if PAA.preview then PAA.preview:Hide() end
-    GameTooltip:Hide()
+    HideItemTip()
 end
 
 local function MouseOverPreview()
@@ -567,12 +782,10 @@ local function AcquireRow(col, i)
     row.text:SetJustifyH("LEFT")
     row:SetScript("OnEnter", function(self)
         if self.bag then
-            GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-            GameTooltip:SetBagItem(self.bag, self.slot)
-            GameTooltip:Show()
+            ShowItemTip(self, self.bag, self.slot, self.itemID, self.link, "ANCHOR_LEFT")
         end
     end)
-    row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    row:SetScript("OnLeave", HideItemTip)
     row:SetScript("OnClick", function(self, btn)
         if btn == "RightButton" then IgnoreItem(self.itemID, self.link) end
     end)
@@ -605,7 +818,13 @@ RefreshPreview = function()
         end
         col:SetHeight(extra + 18 + rows * 18 + 22)
         if c == 1 then
-            col.header:SetText("|cffffd100The following items will be posted:|r")
+            local gold, listings, pending = BagBuyout(items)
+            local head = listings .. " listing" .. (listings == 1 and "" or "s")
+            if listings > 0 then
+                head = head .. "  ·  " .. FormatGold(gold) .. "g"
+            end
+            if pending > 0 then head = head .. "..." end
+            col.header:SetText("|cffffd100" .. head .. "|r")
             col.foot:SetText("|cff888888Right-click an item to ignore it.|r")
         else
             col.header:SetText(string.format("|cffffd100Additional items (%d-%d of %d)|r", startIdx, stopIdx, n))
@@ -651,11 +870,21 @@ local function ShowPreview()
 end
 
 local ticking
+local scoreWait = 0
 
 local function FlushBags()
     bagSoon = 0
     if PAA.preview and PAA.preview:IsShown() then RefreshPreview() end
     if PAA.dock and PAA.dock:IsVisible() and RefreshPostList then RefreshPostList() end
+end
+
+local function WaitingScores()
+    local items = bagItems
+    if not items then return false end
+    for i = 1, #items do
+        if not items[i].scoreReady then return true end
+    end
+    return false
 end
 
 local function OnTick(self, delta)
@@ -664,6 +893,16 @@ local function OnTick(self, delta)
         busy = true
         bagSoon = bagSoon - delta
         if bagSoon <= 0 then FlushBags() end
+    end
+    if PAA.dock and PAA.dock:IsVisible() and WaitingScores() then
+        busy = true
+        scoreWait = scoreWait + (delta or 0)
+        if scoreWait > 0.4 then
+            scoreWait = 0
+            if RefreshPostList then RefreshPostList() end
+        end
+    else
+        scoreWait = 0
     end
     if PAA.preview and PAA.preview:IsShown() then
         busy = true
@@ -700,6 +939,7 @@ local function ApplyPostSkin()
     if not pal then return end
     if PAA.blurb then PAA.blurb:SetTextColor(pal.mute[1], pal.mute[2], pal.mute[3]) end
     if PAA.unit then PAA.unit:SetTextColor(pal.gold[1], pal.gold[2], pal.gold[3]) end
+    if PAA.sum then PAA.sum:SetTextColor(pal.gold[1], pal.gold[2], pal.gold[3]) end
     if PAA.ratioU then PAA.ratioU:SetTextColor(pal.mute[1], pal.mute[2], pal.mute[3]) end
     if PAA.headBg then PAA.headBg:SetVertexColor(pal.head[1], pal.head[2], pal.head[3], pal.head[4] or 1) end
     if PAA.headLine then PAA.headLine:SetVertexColor(pal.accent[1], pal.accent[2], pal.accent[3], 0.9) end
@@ -720,6 +960,8 @@ local function CreateButton()
     local parent = page or PeloriaAuctionHouseFrame
     local Skin = _G.qtEasyAuctionSkin
 
+    PAA:RegisterEvent("BAG_UPDATE")
+    AskMythicBags()
     local dock = CreateFrame("Frame", "PeloriaAutoAuctionDock", parent)
     if page then
         dock:SetAllPoints(page)
@@ -761,6 +1003,31 @@ local function CreateButton()
     button:SetScript("OnEnter", ShowPreview)
     PAA.button = button
 
+    local sumHit = CreateFrame("Button", nil, dock)
+    sumHit:SetHeight(32)
+    sumHit:SetWidth(120)
+    sumHit:SetPoint("RIGHT", button, "LEFT", -8, 0)
+    sumHit:SetFrameLevel(top)
+    local sum = sumHit:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    sum:SetPoint("RIGHT", 0, 0)
+    sum:SetJustifyH("RIGHT")
+    sum:SetText("—")
+    sumHit:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:SetText("Bag buyout")
+        local gold, n, pending = PAA.sumGold or 0, PAA.sumN or 0, PAA.sumPending or 0
+        GameTooltip:AddLine("Total gold if every listing in your bags sells.", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddDoubleLine("Listings", tostring(n), 1, 1, 1, 1, 0.84, 0.45)
+        GameTooltip:AddDoubleLine("Buyout", FormatGold(gold) .. "g", 1, 1, 1, 1, 0.84, 0.45)
+        if pending > 0 then
+            GameTooltip:AddLine(pending .. " still scoring", 0.8, 0.8, 0.8, true)
+        end
+        GameTooltip:Show()
+    end)
+    sumHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    PAA.sum = sum
+    PAA.sumHit = sumHit
+
     local ratioChip = Skin and Skin.Chip and Skin.Chip(dock, 108, 32, "Gold value")
     if ratioChip then
         ratioChip:SetPoint("TOPLEFT", 8, -6)
@@ -787,11 +1054,11 @@ local function CreateButton()
         ratioBox:SetAutoFocus(false)
     end
     ratioBox:SetMaxLetters(8)
-    ratioBox:SetText(FormatRatio(DB.goldValue or 55))
+    ratioBox:SetText(FormatRatio(DB.goldValue or 40))
     local function SaveRatio(self)
         local n = ParseRatio(self:GetText())
         if n then DB.goldValue = n; self:SetText(FormatRatio(n))
-        else self:SetText(FormatRatio(DB.goldValue or 55)) end
+        else self:SetText(FormatRatio(DB.goldValue or 40)) end
         if RefreshPostList then RefreshPostList() end
     end
     ratioBox:SetScript("OnEnterPressed", function(self) SaveRatio(self); self:ClearFocus() end)
@@ -864,9 +1131,32 @@ local function CreateButton()
     PAA.bindChip = bindChip
     PAA.bindCheck = bindChip
 
+    local weights
+    if Skin and Skin.CuteButton then
+        weights = Skin.CuteButton(dock, 108, 28, "Weights")
+    else
+        weights = CreateFrame("Button", nil, dock, "UIPanelButtonTemplate")
+        weights:SetWidth(90)
+        weights:SetHeight(28)
+        weights:SetText("Weights")
+    end
+    weights:SetPoint("TOPRIGHT", -8, -44)
+    weights:SetFrameLevel(top)
+    weights:EnableMouse(true)
+    weights:RegisterForClicks("LeftButtonUp")
+    weights:SetScript("OnClick", function()
+        local Deals = _G.qtEasyAuctionDeals
+        if not Deals or not Deals.ShowWeights then return end
+        local ok, err = pcall(Deals.ShowWeights, "post")
+        if not ok then
+            print("|cffff5555qtEasyAuction:|r weights: " .. tostring(err))
+        end
+    end)
+    PAA.weightBtn = weights
+
     local blurb = dock:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     blurb:SetPoint("LEFT", bindChip or mailChip, "RIGHT", 12, 0)
-    blurb:SetPoint("RIGHT", -12, 0)
+    blurb:SetPoint("RIGHT", weights, "LEFT", -8, 0)
     blurb:SetJustifyH("LEFT")
     blurb:SetText("pin a row to override  ·  right-click ignores")
     PAA.blurb = blurb
@@ -927,6 +1217,25 @@ local function CreateButton()
         HeadBtn("Score", "score", "RIGHT"),
         HeadBtn("Buyout", "price", "RIGHT"),
     }
+    do
+        local scoreHead = PAA.headBtns[2]
+        scoreHead:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        local sortClick = scoreHead:GetScript("OnClick")
+        scoreHead:SetScript("OnClick", function(self, btn)
+            if btn == "RightButton" then
+                RescoreMissing()
+                return
+            end
+            if sortClick then sortClick(self, btn) end
+        end)
+        scoreHead:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+            GameTooltip:SetText("Score")
+            GameTooltip:AddLine("Left-click sorts. Right-click rescores missing.", 0.8, 0.8, 0.8, true)
+            GameTooltip:Show()
+        end)
+        scoreHead:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
     RefreshPostHeads = function()
         local item, score, buy = PAA.headBtns[1], PAA.headBtns[2], PAA.headBtns[3]
         buy:ClearAllPoints()
@@ -976,7 +1285,7 @@ local function CreateButton()
         local r = CreateFrame("Button", nil, list)
         r:SetHeight(ROW_H)
         r:EnableMouse(true)
-        r:RegisterForClicks("RightButtonUp")
+        r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         r.bg = r:CreateTexture(nil, "BACKGROUND")
         r.bg:SetAllPoints()
         r.bg:SetTexture("Interface\\Buttons\\WHITE8X8")
@@ -1021,6 +1330,7 @@ local function CreateButton()
             end
             local p = ItemPrice(item)
             self:SetText(p and FormatGold(p) or "—")
+            PaintBagSum()
         end
         pb:SetScript("OnEnterPressed", function(self)
             CommitPrice(self)
@@ -1031,90 +1341,115 @@ local function CreateButton()
         r.price = pb
         r:SetScript("OnEnter", function(self)
             if self.bag then
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:SetBagItem(self.bag, self.slot)
-                GameTooltip:Show()
+                ShowItemTip(self, self.bag, self.slot, self.itemID, self.link, "ANCHOR_RIGHT")
             end
         end)
-        r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        r:SetScript("OnLeave", HideItemTip)
         r:SetScript("OnClick", function(self, btn)
-            if btn == "RightButton" then IgnoreItem(self.itemID, self.link) end
+            if btn == "RightButton" then
+                IgnoreItem(self.itemID, self.link)
+                return
+            end
+            if (self.score or 0) > 0 and self.scoreReady then return end
+            local items = Items()
+            for i = 1, #items do
+                if items[i].bag == self.bag and items[i].slot == self.slot then
+                    RescoreItem(items[i])
+                    return
+                end
+            end
         end)
         PAA.rows[i] = r
     end
 
     RefreshPostList = function()
-        if not PAA.rows or listBusy then return end
+        if not PAA.rows then return end
+        if listBusy then
+            listDirty = true
+            return
+        end
         listBusy = true
-        LoadDB()
-        local pal = Skin and Skin.C and Skin.C()
-        local items = Items()
-        for i = 1, #items do FillItemScore(items[i]) end
-        SortItems(items)
-        local vis = 12
-        if PAA.list and PAA.list:GetHeight() and PAA.list:GetHeight() > 0 then
-            vis = math.max(6, math.min(18, math.floor(PAA.list:GetHeight() / ROW_H)))
-        end
-        PAA.offset = math.max(0, math.min(PAA.offset or 0, math.max(0, #items - vis)))
-        if PAA.bar then
-            local maxOff = math.max(0, #items - vis)
-            PAA.bar:SetMinMaxValues(0, maxOff)
-            PAA.bar:SetValue(PAA.offset)
-            if maxOff > 0 then PAA.bar:Show() else PAA.bar:Hide() end
-        end
-        for i = 1, 18 do
-            local r = PAA.rows[i]
-            if i > vis then
-                r:Hide()
-            else
-                local e = items[PAA.offset + i]
-                if not e then
+        local ok, err = pcall(function()
+            LoadDB()
+            local pal = Skin and Skin.C and Skin.C()
+            local items = Items()
+            for i = 1, #items do FillItemScore(items[i]) end
+            SortItems(items)
+            local vis = 12
+            if PAA.list and PAA.list:GetHeight() and PAA.list:GetHeight() > 0 then
+                vis = math.max(6, math.min(18, math.floor(PAA.list:GetHeight() / ROW_H)))
+            end
+            PAA.offset = math.max(0, math.min(PAA.offset or 0, math.max(0, #items - vis)))
+            if PAA.bar then
+                local maxOff = math.max(0, #items - vis)
+                PAA.bar:SetMinMaxValues(0, maxOff)
+                PAA.bar:SetValue(PAA.offset)
+                if maxOff > 0 then PAA.bar:Show() else PAA.bar:Hide() end
+            end
+            for i = 1, 18 do
+                local r = PAA.rows[i]
+                if i > vis then
                     r:Hide()
                 else
-                    r:ClearAllPoints()
-                    r:SetPoint("TOPLEFT", PAA.list, "TOPLEFT", 0, -((i - 1) * ROW_H))
-                    r:SetPoint("TOPRIGHT", PAA.list, "TOPRIGHT", 0, -((i - 1) * ROW_H))
-                    r.bag, r.slot, r.itemID, r.link = e.bag, e.slot, e.itemID, e.link
-                    r.score, r.quality, r.scoreReady = e.score or 0, e.quality or 0, e.scoreReady
-                    r.icon:SetTexture(e.texture)
-                    r.icon:SetTexCoord(0.03, 0.97, 0.03, 0.97)
-                    local label = e.link
-                    if e.count and e.count > 1 then
-                        label = label .. " |cffaaaaaax" .. e.count .. "|r"
-                    end
-                    r.name:SetText(label)
-                    if r.scoreFs then
-                        if e.scoreReady then
-                            r.scoreFs:SetText(FormatGold(e.score or 0))
-                            if pal then r.scoreFs:SetTextColor(pal.gold[1], pal.gold[2], pal.gold[3])
-                            else r.scoreFs:SetTextColor(1, 0.84, 0.45) end
-                        else
-                            r.scoreFs:SetText("…")
-                            if pal then r.scoreFs:SetTextColor(pal.mute[1], pal.mute[2], pal.mute[3])
-                            else r.scoreFs:SetTextColor(0.6, 0.56, 0.64) end
-                        end
-                    end
-                    if not r.price:HasFocus() then
-                        local p = ItemPrice(e)
-                        if p then
-                            r.price:SetText(FormatGold(p))
-                        else
-                            r.price:SetText("—")
-                        end
-                    end
-                    local tint = pal and ((i % 2 == 0) and pal.rowA or pal.rowB)
-                    if tint then
-                        r.bg:SetVertexColor(tint[1], tint[2], tint[3], tint[4] or 0.9)
-                    elseif i % 2 == 0 then
-                        r.bg:SetVertexColor(0.16, 0.14, 0.20, 0.9)
+                    local e = items[PAA.offset + i]
+                    if not e then
+                        r:Hide()
                     else
-                        r.bg:SetVertexColor(0.12, 0.11, 0.16, 0.9)
+                        r:ClearAllPoints()
+                        r:SetPoint("TOPLEFT", PAA.list, "TOPLEFT", 0, -((i - 1) * ROW_H))
+                        r:SetPoint("TOPRIGHT", PAA.list, "TOPRIGHT", 0, -((i - 1) * ROW_H))
+                        r.bag, r.slot, r.itemID, r.link = e.bag, e.slot, e.itemID, e.link
+                        r.score, r.quality, r.scoreReady = e.score or 0, e.quality or 0, e.scoreReady
+                        r.icon:SetTexture(e.texture)
+                        r.icon:SetTexCoord(0.03, 0.97, 0.03, 0.97)
+                        local label = e.link
+                        if e.count and e.count > 1 then
+                            label = label .. " |cffaaaaaax" .. e.count .. "|r"
+                        end
+                        r.name:SetText(label)
+                        if r.scoreFs then
+                            if e.scoreReady then
+                                r.scoreFs:SetText(FormatGold(e.score or 0))
+                                if pal then r.scoreFs:SetTextColor(pal.gold[1], pal.gold[2], pal.gold[3])
+                                else r.scoreFs:SetTextColor(1, 0.84, 0.45) end
+                            else
+                                r.scoreFs:SetText("...")
+                                if pal then r.scoreFs:SetTextColor(pal.mute[1], pal.mute[2], pal.mute[3])
+                                else r.scoreFs:SetTextColor(0.6, 0.56, 0.64) end
+                            end
+                        end
+                        if not r.price:HasFocus() then
+                            local p = ItemPrice(e)
+                            if p then
+                                r.price:SetText(FormatGold(p))
+                            elseif not e.scoreReady then
+                                r.price:SetText("...")
+                            else
+                                r.price:SetText("-")
+                            end
+                        end
+                        local tint = pal and ((i % 2 == 0) and pal.rowA or pal.rowB)
+                        if tint then
+                            r.bg:SetVertexColor(tint[1], tint[2], tint[3], tint[4] or 0.9)
+                        elseif i % 2 == 0 then
+                            r.bg:SetVertexColor(0.16, 0.14, 0.20, 0.9)
+                        else
+                            r.bg:SetVertexColor(0.12, 0.11, 0.16, 0.9)
+                        end
+                        r:Show()
                     end
-                    r:Show()
                 end
             end
-        end
+            PaintBagSum(items)
+            if WaitingScores() then EnsureTick() end
+        end)
         listBusy = false
+        if not ok then
+            print("|cffff5555qtEasyAuction:|r post list: " .. tostring(err))
+        elseif listDirty then
+            listDirty = false
+            RefreshPostList()
+        end
     end
     dock:EnableMouseWheel(true)
     dock:SetScript("OnMouseWheel", function(_, delta)
@@ -1133,15 +1468,15 @@ local function CreateButton()
     end
 end
 
-PAA:RegisterEvent("ADDON_LOADED")
 PAA:RegisterEvent("AUCTION_HOUSE_SHOW")
-PAA:RegisterEvent("BAG_UPDATE")
+PAA:RegisterEvent("AUCTION_HOUSE_CLOSED")
 
-PAA:SetScript("OnEvent", function(self, event, arg1)
-    if event == "ADDON_LOADED" and arg1 == "qtEasyAuction" then
-        LoadDB()
-    elseif event == "AUCTION_HOUSE_SHOW" then
+PAA:SetScript("OnEvent", function(self, event)
+    if event == "AUCTION_HOUSE_SHOW" then
+        self:RegisterEvent("BAG_UPDATE")
         CreateButton()
+    elseif event == "AUCTION_HOUSE_CLOSED" then
+        self:UnregisterEvent("BAG_UPDATE")
     elseif event == "BAG_UPDATE" then
         -- ʕ •ᴥ•ʔ✿ coalesce per-bag floods; tooltip scan is the hitch ✿ ʕ •ᴥ•ʔ
         InvalidateBags()
@@ -1151,21 +1486,9 @@ PAA:SetScript("OnEvent", function(self, event, arg1)
     end
 end)
 
-local buttonCheckFrame = CreateFrame("Frame")
-local buttonCheckElapsed = 0
-buttonCheckFrame:SetScript("OnUpdate", function(self, delta)
-    buttonCheckElapsed = buttonCheckElapsed + delta
-    if buttonCheckElapsed < 0.5 then return end
-    buttonCheckElapsed = 0
-    if PeloriaAuctionHouseFrame and PeloriaAuctionHouseFrame:IsShown() and not PAA.dock then
-        CreateButton()
-    end
-    if PAA.dock then
-        self:SetScript("OnUpdate", nil)
-    end
-end)
+LoadDB()
 
-SlashCmdList["QTEASYAUCTION"] = function(msg)
+_G.qtEasyAuctionSlash = function(msg)
     msg = string.lower(msg or "")
     if msg == "test" then
         print("|cff00ff00qtEasyAuction:|r Addon is loaded and working!")
@@ -1211,22 +1534,42 @@ SlashCmdList["QTEASYAUCTION"] = function(msg)
         RefreshPreview()
         if RefreshPostList then RefreshPostList() end
     else
-        print("|cff00ff00qtEasyAuction:|r Commands: /qta test, /qta skin, /qta create, /qta clearignore")
+        print("|cff00ff00qtEasyAuction:|r Commands: /qta test, /qta skin, /qta create, /qta clearignore, /qta gold")
     end
 end
-SLASH_QTEASYAUCTION1 = "/qta"
-SLASH_QTEASYAUCTION2 = "/qtauction"
 
 _G.qtEasyAuctionPost = {
     OnShown = function()
         CreateButton()
+        AskMythicBags()
         InvalidateBags()
         if RefreshPostList then RefreshPostList() end
         ApplyPostSkin()
+        EnsureTick()
+    end,
+    Rescore = function()
+        if bagItems then
+            for i = 1, #bagItems do FillItemScore(bagItems[i]) end
+        else
+            InvalidateBags()
+        end
+        if RefreshPostList then RefreshPostList() end
+        if PAA.preview and PAA.preview:IsShown() then RefreshPreview() end
+        EnsureTick()
     end,
     OnPreview = function()
         if PAA.dock and PAA.dock:IsVisible() and RefreshPostList then
             RefreshPostList()
+        end
+        local h = PAA.hover
+        if h and h:IsShown() and MouseIsOver(h) and h.bag then
+            ShowItemTip(h, h.bag, h.slot, h.itemID, h.link, h.tipAnchor)
+        end
+    end,
+    OnMythic = function()
+        InvalidateBags()
+        if PAA.dock and PAA.dock:IsVisible() then
+            QueueBagRefresh()
         end
     end,
     ApplySkin = function()

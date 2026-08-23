@@ -229,9 +229,11 @@ function S.Char()
     if C.ratioPrice == nil then
         C.ratioPrice = (A.ratioPrice == nil) and true or (A.ratioPrice and true or false)
     end
-    if C.goldValue == nil then C.goldValue = A.goldValue or 55 end
+    if C.goldValue == nil then C.goldValue = A.goldValue or 40 end
+    if C.goldValue == 55 then C.goldValue = 40 end
     if C.ratioPrice then C.scorePrice = false end
     if C.postBindable == nil then C.postBindable = false end
+    if C.searchAll == nil then C.searchAll = false end
     if C.priceMax == nil then C.priceMax = A.priceMax or 3000000 end
     if C.scoreCap == nil then C.scoreCap = A.scoreCap or 1000000 end
     if not C.weights then
@@ -245,6 +247,28 @@ function S.Char()
                 end
             end
         end
+    end
+    local function CopyMap(src)
+        if type(src) ~= "table" then return nil end
+        local t = {}
+        for k, v in pairs(src) do t[k] = v end
+        return t
+    end
+    local function LegacyWeights(bag)
+        if type(bag) ~= "table" then return nil end
+        if type(bag.GENERAL) == "table" then return bag.GENERAL end
+        for _, w in pairs(bag) do
+            if type(w) == "table" then return w end
+        end
+    end
+    local inherited = LegacyWeights(C.weights) or LegacyWeights(A.weights)
+    if type(C.sellWeights) ~= "table" then
+        C.sellWeights = CopyMap(inherited) or {}
+    end
+    -- ʕ •ᴥ•ʔ✿ post used to clone shop weights; reseed once ✿ ʕ •ᴥ•ʔ
+    if C.postWeightSeed ~= 1 then
+        C.postWeights = nil
+        C.postWeightSeed = 1
     end
     if not C.itemPrices then
         C.itemPrices = {}
@@ -344,6 +368,7 @@ local TAB_LINE = {
     "hoppin into some good deals",
     "lining up some listings",
     "watching your auctions",
+    "counting sold and spent",
 }
 
 local function PaintSub()
@@ -503,14 +528,16 @@ local function ShowTab(i, quiet)
         S.pages.deals:Hide()
         S.pages.post:Hide()
         S.pages.mine:Hide()
+        if S.pages.stats then S.pages.stats:Hide() end
         if i == 1 then S.pages.deals:Show()
         elseif i == 2 then S.pages.post:Show()
-        else S.pages.mine:Show() end
+        elseif i == 3 then S.pages.mine:Show()
+        elseif S.pages.stats then S.pages.stats:Show() end
     end
     if S.tabs then
-        S.tabs[1]:SetLocked(i == 1)
-        S.tabs[2]:SetLocked(i == 2)
-        S.tabs[3]:SetLocked(i == 3)
+        for n = 1, #S.tabs do
+            S.tabs[n]:SetLocked(n == i)
+        end
     end
     PaintSub()
     if quiet then return end
@@ -522,6 +549,9 @@ local function ShowTab(i, quiet)
     end
     if i == 3 and _G.qtEasyAuctionMine and _G.qtEasyAuctionMine.OnShown then
         _G.qtEasyAuctionMine.OnShown()
+    end
+    if i == 4 and _G.qtEasyAuctionSales and _G.qtEasyAuctionSales.OnShown then
+        _G.qtEasyAuctionSales.OnShown()
     end
 end
 
@@ -578,6 +608,9 @@ function S.Apply(id)
     end
     if _G.qtEasyAuctionPost and _G.qtEasyAuctionPost.ApplySkin then
         _G.qtEasyAuctionPost.ApplySkin()
+    end
+    if _G.qtEasyAuctionSales and _G.qtEasyAuctionSales.ApplySkin then
+        _G.qtEasyAuctionSales.ApplySkin()
     end
 end
 
@@ -758,10 +791,12 @@ function S.Create()
         { "Deals", "deals" },
         { "Post", "post" },
         { "Auctions", "auctions" },
+        { "Stats", "deals" },
     }
+    local tabW, tabGap = 128, 136
     for i, spec in ipairs(specs) do
-        local t = S.CuteButton(tabBar, 148, 32, spec[1], spec[2])
-        t:SetPoint("LEFT", 6 + (i - 1) * 156, 0)
+        local t = S.CuteButton(tabBar, tabW, 32, spec[1], spec[2])
+        t:SetPoint("LEFT", 6 + (i - 1) * tabGap, 0)
         t:SetScript("OnClick", function() ShowTab(i) end)
         S.tabs[i] = t
     end
@@ -778,7 +813,7 @@ function S.Create()
         p:Hide()
         return p
     end
-    S.pages = { deals = Page(), post = Page(), mine = Page() }
+    S.pages = { deals = Page(), post = Page(), mine = Page(), stats = Page() }
 
     local empty = S.pages.deals:CreateTexture(nil, "BACKGROUND")
     Size(empty, 128, 128)
@@ -838,15 +873,3 @@ function S.Attach()
     end
 end
 
-local boot = CreateFrame("Frame")
-local elapsed = 0
-boot:SetScript("OnUpdate", function(self, delta)
-    elapsed = elapsed + delta
-    if elapsed < 0.25 then return end
-    elapsed = 0
-    if PeloriaAuctionHouseFrame then
-        PeloriaAuctionHouseFrame:SetScale(1)
-        S.Attach()
-        self:SetScript("OnUpdate", nil)
-    end
-end)

@@ -12,6 +12,8 @@ local COL = {}
 
 local listings, shown, offset, page, fetching
 local fetchLeft, refreshAt
+local cancelQ, cancelBusy, cancelAt, cancelTotal, cancelDoneAt
+local pendingCancel, cancelledIds = {}, {}
 local peekWrapped = {}
 local status = ""
 local sortKey, sortDesc = "name", true
@@ -224,6 +226,9 @@ local function Paint()
                 r:SetPoint("TOPLEFT", A.list, "TOPLEFT", 0, -((i - 1) * ROW_H))
                 r:SetPoint("TOPRIGHT", A.list, "TOPRIGHT", 0, -((i - 1) * ROW_H))
                 PlaceRow(r)
+                if r.unlist then
+                    r.unlist:SetFrameLevel((r:GetFrameLevel() or 1) + 6)
+                end
                 local _, _, _, _, _, _, _, _, _, tex = GetItemInfo(e.entry)
                 r.icon:SetTexture(tex or "Interface\\Icons\\INV_Misc_QuestionMark")
                 TrimIcon(r.icon)
@@ -298,11 +303,17 @@ local function Request(pg)
     PeloriaSend(PREFIX .. "^MINE^" .. tostring(pg or 0))
 end
 
+local function Cancelling()
+    return cancelBusy and true or false
+end
+
 local function StartFetch()
+    if Cancelling() then return end
     if type(PeloriaSend) ~= "function" then
         SetStatus("PeloriaSend missing — stand at an auctioneer.")
         return
     end
+    if A.confirm then A.confirm:Hide() end
     if A.searchBox then filterText = CleanQuery(A.searchBox:GetText()) end
     listings, shown, offset, page = {}, {}, 0, 0
     fetching = true
@@ -311,6 +322,21 @@ local function StartFetch()
     Paint()
     SetStatus("Loading your auctions…")
     Request(0)
+end
+
+local function DropCancelled(rows)
+    if not rows then return rows end
+    local now = GetTime()
+    for id, t in pairs(cancelledIds) do
+        if now - t > 20 then cancelledIds[id] = nil end
+    end
+    for i = #rows, 1, -1 do
+        local id = rows[i].idRaw
+        if id and (pendingCancel[id] or cancelledIds[id]) then
+            table.remove(rows, i)
+        end
+    end
+    return rows
 end
 
 local function DropId(idRaw)
@@ -322,45 +348,117 @@ local function DropId(idRaw)
     end
 end
 
+local function FinishCancel()
+    cancelQ, cancelBusy, cancelAt, cancelTotal = nil, nil, nil, nil
+    pendingCancel = {}
+    cancelDoneAt = GetTime() + 0.45
+    SetStatus("Refreshing auctions…")
+end
+
+local function SendCancel(idRaw)
+    if type(PeloriaSend) ~= "function" or not idRaw then return false end
+    return pcall(PeloriaSend, string.format("%s^CANCEL^%s", PREFIX, tostring(idRaw)))
+end
+
+local function QueueRows(rows)
+    if type(PeloriaSend) ~= "function" then
+        SetStatus("PeloriaSend missing — stand at an auctioneer.")
+        return
+    end
+    cancelQ = cancelQ or {}
+    local added = 0
+    for i = 1, #(rows or {}) do
+        local id = rows[i] and rows[i].idRaw
+        if id and not pendingCancel[id] then
+            pendingCancel[id] = true
+            cancelledIds[id] = GetTime()
+            cancelQ[#cancelQ + 1] = { idRaw = id, name = rows[i].name }
+            if _G.qtEasyAuctionSales and _G.qtEasyAuctionSales.DropId then
+                _G.qtEasyAuctionSales.DropId(id)
+            end
+            added = added + 1
+        end
+    end
+    if added == 0 then
+        SetStatus("Nothing to unlist.")
+        return
+    end
+    cancelBusy = true
+    cancelTotal = (cancelTotal or 0) + added
+    cancelAt = 0
+    refreshAt = 0
+    fetching = false
+end
+
+local function PumpCancel()
+    if not cancelBusy then return end
+    if cancelQ and #cancelQ > 0 then
+        if cancelAt and GetTime() < cancelAt then return end
+        local job = table.remove(cancelQ, 1)
+        if SendCancel(job.idRaw) then
+            DropId(job.idRaw)
+            RebuildShown()
+            Paint()
+            cancelAt = GetTime() + 0.08
+            local left = #cancelQ
+            local n = cancelTotal or 1
+            if left > 0 then
+                SetStatus("Unlisting… " .. (n - left) .. "/" .. n)
+            else
+                SetStatus("Unlisting " .. (job.name or "auction") .. ".")
+            end
+        else
+            pendingCancel[job.idRaw] = nil
+            FinishCancel()
+            SetStatus("PeloriaSend failed — stand at an auctioneer.")
+        end
+        return
+    end
+    if cancelAt and GetTime() < cancelAt + 0.5 then return end
+    FinishCancel()
+end
+
 local function CancelOne(row)
-    if not row or not row.idRaw then return end
-    if type(PeloriaSend) ~= "function" then return end
-    PeloriaSend(PREFIX .. "^CANCEL^" .. row.idRaw)
-    DropId(row.idRaw)
-    RebuildShown()
-    Paint()
-    refreshAt = GetTime() + 0.6
-    SetStatus("Unlisting " .. (row.name or "auction") .. ".")
+    if Cancelling() and cancelQ and #cancelQ > 40 then return end
+    QueueRows({ row })
 end
 
 local function CancelAll()
-    if not listings or #listings == 0 then return end
-    if type(PeloriaSend) ~= "function" then return end
-    local n = #listings
-    for i = 1, n do
-        PeloriaSend(PREFIX .. "^CANCEL^" .. listings[i].idRaw)
-    end
-    listings, shown = {}, {}
-    offset = 0
-    Paint()
-    refreshAt = GetTime() + 0.8
-    SetStatus("Unlisted " .. n .. " auctions.")
+    if A.confirm then A.confirm:Hide() end
+    local rows = A.confirmRows
+    if not rows or #rows == 0 then rows = shown end
+    if not rows or #rows == 0 then rows = listings end
+    A.confirmRows = nil
+    QueueRows(rows)
 end
 
 local function OnPacket(body)
     body = body or ""
     body = string.gsub(body, "^PELAH%^", "")
     if string.find(body, "^CANCELLED%^") == 1 then
+        local code = string.match(body, "^CANCELLED%^(%w+)")
+        if Cancelling() then
+            if code == "NOAUCTIONEER" or code == "NOHOUSE" then
+                cancelQ = {}
+                FinishCancel()
+                SetStatus("Step back to the auctioneer.")
+                return
+            end
+            cancelAt = GetTime()
+            return
+        end
         if not fetching then refreshAt = GetTime() + 0.35 end
         return
     end
     if string.find(body, "^MINE%^") ~= 1 then return end
+    if Cancelling() then return end
     local pg, hasMore = string.match(body, "^MINE%^(%d+)%^(%d+)")
     pg, hasMore = tonumber(pg), tonumber(hasMore)
     if pg == nil then return end
     if pg == 0 then listings = {} end
     local first = string.find(body, "~", 1, true)
     local rows = ParseListings(first and string.sub(body, first + 1) or "")
+    rows = DropCancelled(rows)
     for i = 1, #rows do listings[#listings + 1] = rows[i] end
     fetchLeft = 12
     if hasMore == 1 and (pg + 1) < PAGE_CAP then
@@ -379,6 +477,9 @@ local function OnPacket(body)
             SetStatus("")
         end
         Paint()
+        if _G.qtEasyAuctionSales and _G.qtEasyAuctionSales.NoteListings then
+            _G.qtEasyAuctionSales.NoteListings(listings)
+        end
     end
 end
 
@@ -423,28 +524,36 @@ local function InstallHook()
     end
 end
 
-StaticPopupDialogs["QTEASYAUCTION_UNLISTALL"] = {
-    text = "Unlist all %d auctions?",
-    button1 = YES,
-    button2 = NO,
-    OnAccept = CancelAll,
-    timeout = 0,
-    whileDead = 1,
-    hideOnEscape = 1,
-    preferredIndex = 3,
-}
-
 local function AskUnlistAll()
-    local n = listings and #listings or 0
+    if Cancelling() then
+        SetStatus("Already unlisting.")
+        return
+    end
+    local rows = shown
+    if not rows or #rows == 0 then rows = listings end
+    local n = rows and #rows or 0
     if n == 0 then
         SetStatus("Nothing to unlist.")
         return
     end
-    StaticPopup_Show("QTEASYAUCTION_UNLISTALL", n)
+    A.confirmRows = rows
+    if A.confirmText then
+        if listings and #rows < #listings then
+            A.confirmText:SetText("Unlist " .. n .. " matching auctions?")
+        else
+            A.confirmText:SetText("Unlist all " .. n .. " auctions?")
+        end
+    end
+    if A.confirm then
+        A.confirm:Show()
+        A.confirm:Raise()
+        return
+    end
+    CancelAll()
 end
 
 local function CreateRow(parent)
-    local r = CreateFrame("Button", nil, parent)
+    local r = CreateFrame("Frame", nil, parent)
     r:SetHeight(ROW_H)
     r:EnableMouse(true)
     r.bg = r:CreateTexture(nil, "BACKGROUND")
@@ -475,7 +584,11 @@ local function CreateRow(parent)
         unlist:SetText("Unlist")
     end
     unlist:SetPoint("RIGHT", -4, 0)
+    unlist:SetFrameLevel((r:GetFrameLevel() or 1) + 6)
+    unlist:EnableMouse(true)
+    unlist:RegisterForClicks("LeftButtonUp")
     unlist:SetScript("OnClick", function() CancelOne(r.row) end)
+    r.unlist = unlist
     r:SetScript("OnEnter", function(self)
         if not self.row then return end
         local level = tonumber(self.row.mythic) or 0
@@ -531,7 +644,44 @@ local function CreatePanel()
     local unlistAll = Cute(panel, 110, 32, "Unlist All")
     unlistAll:SetPoint("TOPRIGHT", -8, -6)
     unlistAll:SetFrameLevel(top)
+    unlistAll:EnableMouse(true)
+    unlistAll:RegisterForClicks("LeftButtonUp")
     unlistAll:SetScript("OnClick", AskUnlistAll)
+    A.unlistAll = unlistAll
+
+    local confirm = CreateFrame("Frame", "qtEasyAuctionUnlistConfirm", panel)
+    confirm:SetWidth(280)
+    confirm:SetHeight(110)
+    confirm:SetPoint("CENTER", 0, 20)
+    confirm:SetFrameStrata("TOOLTIP")
+    confirm:SetFrameLevel((panel:GetFrameLevel() or 1) + 80)
+    confirm:SetToplevel(true)
+    confirm:EnableMouse(true)
+    confirm:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 16,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    })
+    confirm:SetBackdropColor(0.08, 0.07, 0.12, 0.98)
+    confirm:SetBackdropBorderColor(0.78, 0.55, 0.72, 1)
+    local confirmText = confirm:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    confirmText:SetPoint("TOP", 0, -22)
+    confirmText:SetWidth(240)
+    confirmText:SetJustifyH("CENTER")
+    A.confirmText = confirmText
+    local yes = Cute(confirm, 90, 28, "Unlist")
+    yes:SetPoint("BOTTOMLEFT", 24, 16)
+    yes:SetScript("OnClick", CancelAll)
+    local no = Cute(confirm, 90, 28, "Cancel")
+    no:SetPoint("BOTTOMRIGHT", -24, 16)
+    no:SetScript("OnClick", function()
+        A.confirmRows = nil
+        confirm:Hide()
+    end)
+    confirm:Hide()
+    A.confirm = confirm
+    tinsert(UISpecialFrames, "qtEasyAuctionUnlistConfirm")
 
     local refresh = Cute(panel, 96, 32, "Refresh")
     refresh:SetPoint("RIGHT", unlistAll, "LEFT", -8, 0)
@@ -712,11 +862,16 @@ local function CreatePanel()
     end)
     panel:SetScript("OnShow", function()
         Paint()
-        if not fetching and (not listings or #listings == 0) then
+        if not fetching and not Cancelling() and (not listings or #listings == 0) then
             StartFetch()
         end
     end)
     panel:SetScript("OnUpdate", function(_, delta)
+        if cancelBusy then PumpCancel() end
+        if cancelDoneAt and GetTime() >= cancelDoneAt then
+            cancelDoneAt = nil
+            StartFetch()
+        end
         if not fetching and not (refreshAt and refreshAt > 0) then return end
         if fetching then
             InstallHook()
@@ -751,6 +906,11 @@ function A.ApplySkin()
     if A.searchLine then A.searchLine:SetVertexColor(pal.accent[1], pal.accent[2], pal.accent[3], 0.85) end
     if A.searchHint then A.searchHint:SetTextColor(pal.mute[1], pal.mute[2], pal.mute[3]) end
     if A.searchBox then A.searchBox:SetTextColor(pal.cream[1], pal.cream[2], pal.cream[3]) end
+    if A.confirm then
+        A.confirm:SetBackdropColor(pal.bg[1], pal.bg[2], pal.bg[3], 0.98)
+        A.confirm:SetBackdropBorderColor(pal.accent[1], pal.accent[2], pal.accent[3], 1)
+    end
+    if A.confirmText then A.confirmText:SetTextColor(pal.cream[1], pal.cream[2], pal.cream[3]) end
     if A.RefreshHeads then A.RefreshHeads() end
     Paint()
 end
@@ -760,7 +920,7 @@ function A.OnShown()
     if A.panel then A.panel:Show() end
     A.ApplySkin()
     InstallHook()
-    StartFetch()
+    if not Cancelling() then StartFetch() end
 end
 
 local boot = CreateFrame("Frame")
