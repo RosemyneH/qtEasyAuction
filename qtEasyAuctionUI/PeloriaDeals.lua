@@ -155,7 +155,7 @@ local page
 local PumpPreview, ClearFlight, FinishPreviewPass, PumpScore, InstallHook, InstallPeekHook
 local PumpDrill, BeginDrillPass, BeginTooltipPass, SetStatus
 local EnqueueNewWork, PumpPublish, MaybeFinishScan, MakeDeal, FillInfoFromPackets
-local Paint, ApplyFilter, ScanLabel, FinishRead, PaintMassGoldWarn, PaintPreviewProgress
+local Paint, ApplyFilter, ScanLabel, FinishRead, PaintMassGoldWarn, PaintPreviewProgress, PaintSweepGold
 
 local function NextGen()
     C.GEN = C.GEN + 1
@@ -1395,9 +1395,14 @@ local function QueueBuy(row)
     }
 end
 
+local function HideSweepGold()
+    if D.sweepGold then D.sweepGold:Hide() end
+end
+
 local function ClearSweep()
     S.sweep, S.sweepHeld, S.sweepHover, S.sweepSet, S.sweepOrder, S.sweepAnchor = false, false, nil, nil, nil, nil
     S.massList = nil
+    HideSweepGold()
     if D.rows then Paint() end
 end
 
@@ -1690,6 +1695,7 @@ end
 local function FinishSweep()
     if not S.sweep then return end
     S.sweep, S.sweepHeld = false, false
+    HideSweepGold()
     local list = S.sweepOrder
     if list and #list > 0 then
         ShowMassConfirm(list)
