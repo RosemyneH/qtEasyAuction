@@ -3408,6 +3408,7 @@ local function CreatePanel()
             elseif S.sweepHeld then
                 FinishSweep()
             end
+            if S.sweep then PaintSweepGold() end
         end
         if S.state == "fetch" then
             InstallHook()
