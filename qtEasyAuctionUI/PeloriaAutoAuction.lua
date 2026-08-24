@@ -261,8 +261,8 @@ local bagSoon = 0
 local listBusy, listDirty = false, false
 local paintSoon = 0
 local scan = { on = false, bag = 0, slot = 1, items = nil }
-local POST_BATCH, POST_TICK = 64, 0.1
-local postJobs, postIdx, postWait, postSent, postRet, postHow
+local POST_BATCH, POST_TICK = 80, 0.1
+local postJobs, postIdx, postWait, postSent, postRet, postHow, postBagDirty
 local postPump = CreateFrame("Frame", nil, UIParent)
 postPump:Hide()
 
@@ -633,7 +633,7 @@ local function SetPostLabel(text)
     end
 end
 
--- ʕ ● ᴥ ●ʔ✿ 64 SELL packets per 0.1s — server packet cap ✿ ʕ ● ᴥ ●ʔ
+-- ʕ ● ᴥ ●ʔ✿ 80 SELL packets per 0.1s — server packet cap ✿ ʕ ● ᴥ ●ʔ
 local function SendSell(b, s, stack, stacks, copper, ret)
     if type(PeloriaSend) ~= "function" then return false end
     return pcall(PeloriaSend, string.format(
@@ -769,8 +769,9 @@ local function Start()
     else
         postHow = "simple " .. FormatGold(PriceGold()) .. "g"
     end
-    -- ʕノ•ᴥ•ʔノ first 64 leave on the next tick, not inside the click ✿ ʕノ•ᴥ•ʔノ
+    -- ʕノ•ᴥ•ʔノ first 80 leave on the next tick, not inside the click ✿ ʕノ•ᴥ•ʔノ
     postJobs, postIdx, postSent, postWait, postRet = jobs, 1, 0, POST_TICK, ReturnFlag()
+    postBagDirty = false
     SetPostLabel("1/" .. #jobs)
     print("|cff00ff00PeloriaAuto:|r Posting " .. #jobs .. " listing(s)  ·  " .. FormatGold(bagGold) .. "g. " .. postHow .. ".")
     postPump:Show()
