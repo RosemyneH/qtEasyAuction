@@ -156,6 +156,26 @@ local PumpPreview, ClearFlight, FinishPreviewPass, PumpScore, InstallHook, Insta
 local PumpDrill, BeginDrillPass, BeginTooltipPass, SetStatus
 local EnqueueNewWork, PumpPublish, MaybeFinishScan, MakeDeal, FillInfoFromPackets
 local Paint, ApplyFilter, ScanLabel, FinishRead, PaintMassGoldWarn, PaintPreviewProgress, PaintSweepGold
+local FinishMassBuy
+
+local function AccountDB()
+    qtEasyAuctionDB = qtEasyAuctionDB or {}
+    qtEasyAuctionDB.hiddenSellers = qtEasyAuctionDB.hiddenSellers or {}
+    qtEasyAuctionDB.bulkBuyDelay = tonumber(qtEasyAuctionDB.bulkBuyDelay) or 0.10
+    return qtEasyAuctionDB
+end
+
+local function SellerKey(name)
+    name = string.lower(tostring(name or ""))
+    name = string.gsub(name, "^%s+", "")
+    name = string.gsub(name, "%s+$", "")
+    return name
+end
+
+local function IsSellerHidden(name)
+    local key = SellerKey(name)
+    return key ~= "" and AccountDB().hiddenSellers[key] ~= nil
+end
 
 local function NextGen()
     C.GEN = C.GEN + 1
@@ -1143,6 +1163,7 @@ local function ApplySort()
 end
 
 local function DealMatches(deal, q)
+    if IsSellerHidden(deal.owner) then return false end
     if not q or q == "" then return true end
     local name = string.lower(deal.name or "")
     local seller = string.lower(deal.owner or "")
@@ -1557,6 +1578,7 @@ local function CanMassBuy(deal)
     if not deal or not deal.idRaw or not deal.buyoutRaw then return false end
     local me = UnitName("player")
     if deal.owner and me and deal.owner == me then return false end
+    if IsSellerHidden(deal.owner) then return false end
     return true
 end
 
@@ -3061,13 +3083,28 @@ local function CreateRow(parent)
         if btn == "RightButton" and IsShiftKeyDown() then BeginSweep(r.deal) end
     end)
     buy:SetScript("OnMouseUp", function(_, btn)
-        if btn == "RightButton" then FinishSweep() end
+        if btn == "RightButton" then
+            if S.sweep then FinishSweep() end
+        end
     end)
+    r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     r:SetScript("OnMouseDown", function(self, btn)
         if btn == "RightButton" and IsShiftKeyDown() then BeginSweep(self.deal) end
     end)
-    r:SetScript("OnMouseUp", function(_, btn)
-        if btn == "RightButton" then FinishSweep() end
+    r:SetScript("OnMouseUp", function(self, btn)
+        if btn ~= "RightButton" then return end
+        if S.sweep then
+            FinishSweep()
+            return
+        end
+        local owner = self.deal and self.deal.owner
+        local key = SellerKey(owner)
+        if key == "" then return end
+        AccountDB().hiddenSellers[key] = owner
+        SetStatus("Hidden listings from " .. owner .. ".")
+        ApplyFilter()
+        local settings = _G.qtEasyAuctionSettings
+        if settings and settings.Refresh then settings.Refresh() end
     end)
     r:SetScript("OnEnter", function(self)
         if S.sweep then
@@ -3454,6 +3491,10 @@ function D.ApplySkin()
     PaintWeightFrame()
     PaintMassConfirm()
     Paint()
+end
+
+function D.RefreshSellerFilter()
+    ApplyFilter()
 end
 
 function D.OnShown()
