@@ -10,4 +10,5 @@
 PeloriaAutoAuction.lua
 PeloriaDeals.lua
 PeloriaAuctions.lua
+PeloriaSettings.lua
 PeloriaSkin.lua
