@@ -235,6 +235,7 @@ local RefreshPostList
 local RefreshPreview
 local RequestPaint
 local QueueBagRefresh
+local WaitingScores
 
 local sortKey, sortDesc = "score", true
 
@@ -714,10 +715,14 @@ local function Start()
     end
 
     local items = bagItems
-    if not items or scan.on then
-        print("|cffffff00PeloriaAuto:|r Still scanning bags — wait for prices, then Post All.")
-        if not items and not scan.on and bagSoon <= 0 then StartBagScan() end
+    if scan.on then
+        print("|cffffff00PeloriaAuto:|r Still scanning bags — wait a moment, then Post All.")
         return
+    end
+    if not items then
+        items = CollectItems()
+        bagItems = items
+        EnsureTick()
     end
     if #items == 0 then
         print("|cffffff00PeloriaAuto:|r Nothing to post.")
@@ -941,7 +946,7 @@ local function FlushBags()
     StartBagScan()
 end
 
-local function WaitingScores()
+WaitingScores = function()
     local items = bagItems
     if not items then return false end
     for i = 1, #items do
