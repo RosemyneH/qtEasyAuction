@@ -646,6 +646,10 @@ local function FinishPost()
     postJobs, postIdx, postWait = nil, 1, 0
     postPump:Hide()
     SetPostLabel("Post All")
+    if postBagDirty then
+        postBagDirty = false
+        QueueBagRefresh()
+    end
     if sent == 0 then
         print("|cffff0000PeloriaAuto:|r PeloriaSend failed — stand near an auctioneer.")
         return
@@ -1581,6 +1585,10 @@ PAA:SetScript("OnEvent", function(self, event)
         local live = (PAA.preview and PAA.preview:IsShown())
             or (PAA.dock and PAA.dock:IsVisible())
         if not live then return end
+        if postJobs then
+            postBagDirty = true
+            return
+        end
         QueueBagRefresh()
     end
 end)
