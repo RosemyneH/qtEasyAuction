@@ -3,8 +3,8 @@ local UI = "qtEasyAuctionUI"
 local watch = CreateFrame("Frame")
 local pump = CreateFrame("Frame")
 local elapsed, tries, warned = 0, 0, nil
-local wrappedPelah, watchElapsed, watchTries = nil, 0, 0
-local WATCH_GAP, WATCH_CAP = 0.25, 120
+local wrappedPelah, watchElapsed = nil, 0
+local WATCH_GAP = 0.25
 local origClose
 
 local function StopPump()
@@ -75,6 +75,13 @@ local function ArmClose()
     return true
 end
 
+local function PacketArmed()
+    local handlers = _G.PeloriaPacketHandlers
+    return wrappedPelah
+        and type(handlers) == "table"
+        and handlers.PELAH == wrappedPelah
+end
+
 -- ʕ •ᴥ•ʔ✿ Peloria AH opens on PELAH OPEN, not AUCTION_HOUSE_SHOW ✿ ʕ •ᴥ•ʔ
 local function ArmPackets()
     local handlers = _G.PeloriaPacketHandlers
@@ -100,7 +107,7 @@ local function Arm()
     ArmPackets()
     ArmClose()
     ArmFrame()
-    if wrappedPelah or watchTries >= WATCH_CAP then
+    if PacketArmed() then
         watch:SetScript("OnUpdate", nil)
     end
 end
@@ -109,16 +116,15 @@ local function Watch(_, delta)
     watchElapsed = watchElapsed + (delta or 1)
     if watchElapsed < WATCH_GAP then return end
     watchElapsed = 0
-    watchTries = watchTries + 1
     Arm()
 end
 
 local function StartWatch()
-    if wrappedPelah then
+    if PacketArmed() then
         ArmFrame()
         return
     end
-    watchElapsed, watchTries = WATCH_GAP, 0
+    watchElapsed = WATCH_GAP
     watch:SetScript("OnUpdate", Watch)
     Watch(watch, 0)
 end
@@ -133,6 +139,7 @@ watch:SetScript("OnEvent", function(_, event)
         return
     end
     if event == "AUCTION_HOUSE_SHOW" then
+        Arm()
         Wake()
         return
     end
