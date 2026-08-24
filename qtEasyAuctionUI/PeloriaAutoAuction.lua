@@ -180,6 +180,8 @@ local function IsIgnored(link)
 end
 
 local stateCache = {}
+local SCAN_PER, SCORE_PER = 8, 4
+local EMPTY = {}
 
 local function BagItemState(b, s, link)
     local key = b * 100 + s
@@ -228,38 +230,36 @@ local function ShouldPost(link, bag, slot)
 end
 
 local FillItemScore
+local EnsureTick
+local RefreshPostList
+local RefreshPreview
+local RequestPaint
+local QueueBagRefresh
 
 local sortKey, sortDesc = "score", true
 
-local function CollectItems()
-    local items = {}
-    for b = 0, 4 do
-        local slots = GetContainerNumSlots(b) or 0
-        for s = 1, slots do
-            local link = GetContainerItemLink(b, s)
-            if link and ShouldPost(link, b, s) then
-                local texture, count = GetContainerItemInfo(b, s)
-                local name, _, quality = GetItemInfo(link)
-                items[#items + 1] = {
-                    bag = b,
-                    slot = s,
-                    link = link,
-                    itemID = ItemIDFromLink(link),
-                    texture = texture,
-                    count = count or 1,
-                    name = name or "",
-                    quality = quality or 0,
-                }
-                FillItemScore(items[#items])
-            end
-        end
-    end
-    return items
+local function MakeItem(b, s, link)
+    local texture, count = GetContainerItemInfo(b, s)
+    local name, _, quality = GetItemInfo(link)
+    return {
+        bag = b,
+        slot = s,
+        link = link,
+        itemID = ItemIDFromLink(link),
+        texture = texture,
+        count = count or 1,
+        name = name or "",
+        quality = quality or 0,
+        score = 0,
+        scoreReady = false,
+    }
 end
 
 local bagItems
 local bagSoon = 0
 local listBusy, listDirty = false, false
+local paintSoon = 0
+local scan = { on = false, bag = 0, slot = 1, items = nil }
 local POST_BATCH, POST_TICK = 64, 0.1
 local postJobs, postIdx, postWait, postSent, postRet, postHow
 local postPump = CreateFrame("Frame", nil, UIParent)
@@ -268,11 +268,70 @@ postPump:Hide()
 local function InvalidateBags()
     bagItems = nil
     stateCache = {}
+    scan.on = false
+end
+
+local function FinishScan(items)
+    scan.on = false
+    bagItems = items or {}
+    paintSoon = 0
+    if RefreshPostList then RefreshPostList() end
+    if PAA.preview and PAA.preview:IsShown() and RefreshPreview then RefreshPreview() end
+    EnsureTick()
+end
+
+local function PumpBagScan()
+    if not scan.on then return false end
+    local n = 0
+    while n < SCAN_PER do
+        if scan.bag > 4 then
+            FinishScan(scan.items)
+            return false
+        end
+        local slots = GetContainerNumSlots(scan.bag) or 0
+        if scan.slot > slots then
+            scan.bag = scan.bag + 1
+            scan.slot = 1
+        else
+            local link = GetContainerItemLink(scan.bag, scan.slot)
+            if link and ShouldPost(link, scan.bag, scan.slot) then
+                scan.items[#scan.items + 1] = MakeItem(scan.bag, scan.slot, link)
+            end
+            scan.slot = scan.slot + 1
+            n = n + 1
+        end
+    end
+    return true
+end
+
+local function StartBagScan()
+    scan.on = true
+    scan.bag, scan.slot = 0, 1
+    scan.items = {}
+    EnsureTick()
+end
+
+-- ʕ •ᴥ•ʔ✿ sync path for Post All only — UI uses StartBagScan ✿ ʕ •ᴥ•ʔ
+local function CollectItems()
+    local items = {}
+    for b = 0, 4 do
+        local slots = GetContainerNumSlots(b) or 0
+        for s = 1, slots do
+            local link = GetContainerItemLink(b, s)
+            if link and ShouldPost(link, b, s) then
+                items[#items + 1] = MakeItem(b, s, link)
+            end
+        end
+    end
+    return items
 end
 
 local function Items()
-    if not bagItems then bagItems = CollectItems() end
-    return bagItems
+    if bagItems then return bagItems end
+    if scan.on then return scan.items or EMPTY end
+    if bagSoon > 0 then return EMPTY end
+    StartBagScan()
+    return EMPTY
 end
 
 local SENTINEL_BASE, SENTINEL_MAX = 20000, 60020000
@@ -312,7 +371,6 @@ local function MythicFor(bag, slot, link)
     if v and v > 0 then return v end
     v = MythicFromLink(link)
     if v and v > 0 then return v end
-    stateCache[(bag or 0) * 100 + (slot or 0)] = nil
     local state = BagItemState(bag, slot, link)
     if state and state.mythic and state.mythic > 0 then return state.mythic end
     return 0
@@ -363,7 +421,7 @@ end
 
 RescoreMissing = function()
     stateCache = {}
-    local items = Items()
+    local items = bagItems or (scan.on and scan.items) or EMPTY
     local D = _G.qtEasyAuctionDeals
     for i = 1, #items do
         local it = items[i]
@@ -374,7 +432,7 @@ RescoreMissing = function()
             it.score, it.scoreReady = 0, false
         end
     end
-    if RefreshPostList then RefreshPostList() end
+    RequestPaint()
     EnsureTick()
 end
 
@@ -553,18 +611,14 @@ local function ReturnFlag()
     return (DB and DB.returnUnsold) and 1 or 0
 end
 
-local RefreshPreview
-local RefreshPostList
 local RefreshPostHeads
-local EnsureTick
 local RescoreMissing
 
 local function AskMythicBags()
     local D = _G.qtEasyAuctionDeals
     if D and D.AskMythicBags then
         D.AskMythicBags(function()
-            InvalidateBags()
-            if RefreshPostList then RefreshPostList() end
+            QueueBagRefresh()
         end)
     end
 end
@@ -659,7 +713,12 @@ local function Start()
         end
     end
 
-    local items = CollectItems()
+    local items = bagItems
+    if not items or scan.on then
+        print("|cffffff00PeloriaAuto:|r Still scanning bags — wait for prices, then Post All.")
+        if not items and not scan.on and bagSoon <= 0 then StartBagScan() end
+        return
+    end
     if #items == 0 then
         print("|cffffff00PeloriaAuto:|r Nothing to post.")
         return
@@ -684,8 +743,16 @@ local function Start()
         end
     end
     if #jobs == 0 then
-        print("|cffffff00PeloriaAuto:|r No scored items to post.")
+        if WaitingScores() then
+            print("|cffffff00PeloriaAuto:|r Prices still loading — try again in a moment.")
+            EnsureTick()
+        else
+            print("|cffffff00PeloriaAuto:|r No scored items to post.")
+        end
         return
+    end
+    if WaitingScores() and #jobs < #items then
+        print("|cffffff00PeloriaAuto:|r Posting " .. #jobs .. " ready listing(s); " .. (#items - #jobs) .. " still pricing.")
     end
 
     local bagGold = 0
@@ -741,9 +808,7 @@ local function IgnoreItem(itemID, link)
     LoadDB()
     AccountDB().ignore[itemID] = true
     print("|cffffff00PeloriaAuto:|r Ignored", link or itemID)
-    InvalidateBags()
-    RefreshPreview()
-    if RefreshPostList then RefreshPostList() end
+    QueueBagRefresh()
 end
 
 local function AcquireColumn(i)
@@ -870,12 +935,10 @@ local function ShowPreview()
 end
 
 local ticking
-local scoreWait = 0
 
 local function FlushBags()
     bagSoon = 0
-    if PAA.preview and PAA.preview:IsShown() then RefreshPreview() end
-    if PAA.dock and PAA.dock:IsVisible() and RefreshPostList then RefreshPostList() end
+    StartBagScan()
 end
 
 local function WaitingScores()
@@ -887,6 +950,26 @@ local function WaitingScores()
     return false
 end
 
+local function PumpScores()
+    local items = bagItems
+    if not items then return false end
+    local n = 0
+    for i = 1, #items do
+        local it = items[i]
+        if not it.scoreReady then
+            FillItemScore(it)
+            n = n + 1
+            if n >= SCORE_PER then break end
+        end
+    end
+    return n > 0
+end
+
+RequestPaint = function()
+    listDirty = true
+    EnsureTick()
+end
+
 local function OnTick(self, delta)
     local busy = false
     if bagSoon > 0 then
@@ -894,15 +977,26 @@ local function OnTick(self, delta)
         bagSoon = bagSoon - delta
         if bagSoon <= 0 then FlushBags() end
     end
-    if PAA.dock and PAA.dock:IsVisible() and WaitingScores() then
+    if scan.on then
         busy = true
-        scoreWait = scoreWait + (delta or 0)
-        if scoreWait > 0.4 then
-            scoreWait = 0
+        PumpBagScan()
+        listDirty = true
+    end
+    if WaitingScores() then
+        busy = true
+        if PumpScores() then listDirty = true end
+    end
+    if listDirty then
+        busy = true
+        paintSoon = (paintSoon or 0) + (delta or 0)
+        if paintSoon >= 0.12 then
+            paintSoon = 0
+            listDirty = false
             if RefreshPostList then RefreshPostList() end
+            if PAA.preview and PAA.preview:IsShown() and RefreshPreview then
+                RefreshPreview()
+            end
         end
-    else
-        scoreWait = 0
     end
     if PAA.preview and PAA.preview:IsShown() then
         busy = true
@@ -928,7 +1022,10 @@ EnsureTick = function()
     PAA:SetScript("OnUpdate", OnTick)
 end
 
-local function QueueBagRefresh()
+QueueBagRefresh = function()
+    bagItems = nil
+    stateCache = {}
+    scan.on = false
     bagSoon = 0.15
     EnsureTick()
 end
@@ -1122,9 +1219,7 @@ local function CreateButton()
         bindChip.OnToggle = function(self, on)
             DB.postBindable = on and true or false
             self:SetOn(DB.postBindable)
-            InvalidateBags()
-            if RefreshPostList then RefreshPostList() end
-            if RefreshPreview then RefreshPreview() end
+            QueueBagRefresh()
         end
     end
     PAA.bindChip = bindChip
@@ -1372,7 +1467,6 @@ local function CreateButton()
             LoadDB()
             local pal = Skin and Skin.C and Skin.C()
             local items = Items()
-            for i = 1, #items do FillItemScore(items[i]) end
             SortItems(items)
             local vis = 12
             if PAA.list and PAA.list:GetHeight() and PAA.list:GetHeight() > 0 then
@@ -1412,7 +1506,7 @@ local function CreateButton()
                                 if pal then r.scoreFs:SetTextColor(pal.gold[1], pal.gold[2], pal.gold[3])
                                 else r.scoreFs:SetTextColor(1, 0.84, 0.45) end
                             else
-                                r.scoreFs:SetText("...")
+                                r.scoreFs:SetText(scan.on and ".." or "...")
                                 if pal then r.scoreFs:SetTextColor(pal.mute[1], pal.mute[2], pal.mute[3])
                                 else r.scoreFs:SetTextColor(0.6, 0.56, 0.64) end
                             end
@@ -1440,7 +1534,7 @@ local function CreateButton()
                 end
             end
             PaintBagSum(items)
-            if WaitingScores() then EnsureTick() end
+            if scan.on or WaitingScores() then EnsureTick() end
         end)
         listBusy = false
         if not ok then
@@ -1481,7 +1575,6 @@ PAA:SetScript("OnEvent", function(self, event)
         local live = (PAA.preview and PAA.preview:IsShown())
             or (PAA.dock and PAA.dock:IsVisible())
         if not live then return end
-        InvalidateBags()
         QueueBagRefresh()
     end
 end)
@@ -1530,9 +1623,7 @@ _G.qtEasyAuctionSlash = function(msg)
         LoadDB()
         AccountDB().ignore = {}
         print("|cff00ff00qtEasyAuction:|r Ignore list cleared.")
-        InvalidateBags()
-        RefreshPreview()
-        if RefreshPostList then RefreshPostList() end
+        QueueBagRefresh()
     else
         print("|cff00ff00qtEasyAuction:|r Commands: /qta test, /qta skin, /qta create, /qta clearignore, /qta gold")
     end
@@ -1543,32 +1634,29 @@ _G.qtEasyAuctionPost = {
         CreateButton()
         PAA:RegisterEvent("BAG_UPDATE")
         AskMythicBags()
-        InvalidateBags()
-        if RefreshPostList then RefreshPostList() end
+        QueueBagRefresh()
         ApplyPostSkin()
         EnsureTick()
     end,
     Rescore = function()
         if bagItems then
-            for i = 1, #bagItems do FillItemScore(bagItems[i]) end
+            for i = 1, #bagItems do
+                bagItems[i].score, bagItems[i].scoreReady = 0, false
+            end
         else
-            InvalidateBags()
+            QueueBagRefresh()
         end
-        if RefreshPostList then RefreshPostList() end
-        if PAA.preview and PAA.preview:IsShown() then RefreshPreview() end
+        RequestPaint()
         EnsureTick()
     end,
     OnPreview = function()
-        if PAA.dock and PAA.dock:IsVisible() and RefreshPostList then
-            RefreshPostList()
-        end
+        RequestPaint()
         local h = PAA.hover
         if h and h:IsShown() and MouseIsOver(h) and h.bag then
             ShowItemTip(h, h.bag, h.slot, h.itemID, h.link, h.tipAnchor)
         end
     end,
     OnMythic = function()
-        InvalidateBags()
         if PAA.dock and PAA.dock:IsVisible() then
             QueueBagRefresh()
         end
