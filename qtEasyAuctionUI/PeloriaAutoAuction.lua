@@ -699,6 +699,15 @@ postPump:SetScript("OnUpdate", function(self, delta)
     end
 end)
 
+WaitingScores = function()
+    local items = bagItems
+    if not items then return false end
+    for i = 1, #items do
+        if not items[i].scoreReady then return true end
+    end
+    return false
+end
+
 local function Start()
     if postJobs then
         print("|cffffff00PeloriaAuto:|r Already posting " .. (postIdx - 1) .. "/" .. #postJobs .. ".")
@@ -949,15 +958,6 @@ local ticking
 local function FlushBags()
     bagSoon = 0
     StartBagScan()
-end
-
-WaitingScores = function()
-    local items = bagItems
-    if not items then return false end
-    for i = 1, #items do
-        if not items[i].scoreReady then return true end
-    end
-    return false
 end
 
 local function PumpScores()
