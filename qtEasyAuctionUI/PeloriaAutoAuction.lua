@@ -960,7 +960,6 @@ local function CreateButton()
     local parent = page or PeloriaAuctionHouseFrame
     local Skin = _G.qtEasyAuctionSkin
 
-    PAA:RegisterEvent("BAG_UPDATE")
     AskMythicBags()
     local dock = CreateFrame("Frame", "PeloriaAutoAuctionDock", parent)
     if page then
@@ -1479,10 +1478,11 @@ PAA:SetScript("OnEvent", function(self, event)
         self:UnregisterEvent("BAG_UPDATE")
     elseif event == "BAG_UPDATE" then
         -- ʕ •ᴥ•ʔ✿ coalesce per-bag floods; tooltip scan is the hitch ✿ ʕ •ᴥ•ʔ
+        local live = (PAA.preview and PAA.preview:IsShown())
+            or (PAA.dock and PAA.dock:IsVisible())
+        if not live then return end
         InvalidateBags()
-        if (PAA.preview and PAA.preview:IsShown()) or (PAA.dock and PAA.dock:IsVisible()) then
-            QueueBagRefresh()
-        end
+        QueueBagRefresh()
     end
 end)
 
@@ -1541,6 +1541,7 @@ end
 _G.qtEasyAuctionPost = {
     OnShown = function()
         CreateButton()
+        PAA:RegisterEvent("BAG_UPDATE")
         AskMythicBags()
         InvalidateBags()
         if RefreshPostList then RefreshPostList() end

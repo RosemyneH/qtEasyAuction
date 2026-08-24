@@ -115,14 +115,6 @@ local function GoldText(copper)
     return Compact((tonumber(copper) or 0) / 10000) .. "g"
 end
 
-local function GoldTotal()
-    if type(_G.PeloriaGoldTotal) == "function" then
-        local ok, v = pcall(_G.PeloriaGoldTotal)
-        if ok and type(v) == "number" then return v end
-    end
-    return GetMoney() or 0
-end
-
 local function DB()
     qtEasyAuctionCharDB = qtEasyAuctionCharDB or {}
     local s = qtEasyAuctionCharDB.sales
@@ -266,27 +258,49 @@ local function TakeListing(name)
     return best
 end
 
+-- ʕ •ᴥ•ʔ✿ bag money only — sales land here, not account totals ✿ ʕ •ᴥ•ʔ
+local function BagGold()
+    return GetMoney() or 0
+end
+
+local Pulse
+local hookWait, hookTries = 0, 0
+local HOOK_GAP, HOOK_CAP = 0.5, 80
+
+local function ArmPulse()
+    if watch or (not peekWrapped.ok and hookTries < HOOK_CAP) then
+        ev:SetScript("OnUpdate", Pulse)
+    else
+        ev:SetScript("OnUpdate", nil)
+    end
+end
+
 local function SampleGold()
-    lastGold = GoldTotal()
+    lastGold = BagGold()
 end
 
 local function FinishWatch(copper)
     local job = watch
     watch, watchLeft = nil, nil
-    if not job then return end
+    if not job then
+        ArmPulse()
+        return
+    end
     copper = math.floor(tonumber(copper) or 0)
     if copper > 0 then
         if AddSale(job.name, copper, "gold", job.idRaw) then
             print("|cff00ff00qtEasyAuction:|r Sold " .. (job.name or "") .. "  ·  " .. GoldText(copper))
         end
+        ArmPulse()
         return
     end
     DB().pending = (DB().pending or 0) + 1
     Paint()
+    ArmPulse()
 end
 
 local function OnGoldBump()
-    local now = GoldTotal()
+    local now = BagGold()
     local prev = lastGold or now
     lastGold = now
     if not watch then return end
@@ -294,22 +308,29 @@ local function OnGoldBump()
     if d > 0 then FinishWatch(d) end
 end
 
-local function Pulse(_, delta)
-    if not peekWrapped.ok then InstallHook() end
-    if not watch then
-        if peekWrapped.ok then ev:SetScript("OnUpdate", nil) end
-        return
+Pulse = function(_, delta)
+    if not peekWrapped.ok and hookTries < HOOK_CAP then
+        hookWait = hookWait + (delta or 0)
+        if hookWait >= HOOK_GAP then
+            hookWait = 0
+            hookTries = hookTries + 1
+            InstallHook()
+        end
     end
-    watchLeft = (watchLeft or 0) - (delta or 0)
-    OnGoldBump()
-    if watch and watchLeft <= 0 then FinishWatch(0) end
+    if watch then
+        watchLeft = (watchLeft or 0) - (delta or 0)
+        if watchLeft <= 0 then FinishWatch(0) end
+    end
+    if not watch and (peekWrapped.ok or hookTries >= HOOK_CAP) then
+        ev:SetScript("OnUpdate", nil)
+    end
 end
 
 local function StartWatch(name, idRaw)
-    watch = { name = name, idRaw = idRaw, gold = GoldTotal() }
+    watch = { name = name, idRaw = idRaw, gold = BagGold() }
     watchLeft = 2.5
     lastGold = watch.gold
-    ev:SetScript("OnUpdate", Pulse)
+    ArmPulse()
 end
 
 local function DayBits(b)
@@ -947,10 +968,14 @@ ev:SetScript("OnEvent", function(_, event, arg1)
     end
     SampleGold()
     InstallHook()
+    if not peekWrapped.ok then
+        hookTries, hookWait = 0, 0
+    end
+    ArmPulse()
     if type(_G.PeloriaRegisterGoldCallback) == "function" and not T._goldCb then
         T._goldCb = true
         pcall(_G.PeloriaRegisterGoldCallback, OnGoldBump)
     end
 end)
 
-ev:SetScript("OnUpdate", Pulse)
+ArmPulse()

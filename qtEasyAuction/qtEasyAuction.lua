@@ -3,7 +3,8 @@ local UI = "qtEasyAuctionUI"
 local watch = CreateFrame("Frame")
 local pump = CreateFrame("Frame")
 local elapsed, tries, warned = 0, 0, nil
-local wrappedPelah, watchElapsed = nil, 0
+local wrappedPelah, watchElapsed, watchTries = nil, 0, 0
+local WATCH_GAP, WATCH_CAP = 0.25, 120
 local origClose
 
 local function StopPump()
@@ -99,15 +100,16 @@ local function Arm()
     ArmPackets()
     ArmClose()
     ArmFrame()
-    if wrappedPelah then
+    if wrappedPelah or watchTries >= WATCH_CAP then
         watch:SetScript("OnUpdate", nil)
     end
 end
 
 local function Watch(_, delta)
     watchElapsed = watchElapsed + (delta or 1)
-    if watchElapsed < 0.25 then return end
+    if watchElapsed < WATCH_GAP then return end
     watchElapsed = 0
+    watchTries = watchTries + 1
     Arm()
 end
 
@@ -116,7 +118,7 @@ local function StartWatch()
         ArmFrame()
         return
     end
-    watchElapsed = 0.25
+    watchElapsed, watchTries = WATCH_GAP, 0
     watch:SetScript("OnUpdate", Watch)
     Watch(watch, 0)
 end
