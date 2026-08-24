@@ -3063,7 +3063,10 @@ local function CreateRow(parent)
         buy:SetText("Buy")
     end
     buy:SetPoint("RIGHT", -2, 0)
-    buy:SetScript("OnClick", function() BuyDeal(r.deal) end)
+    buy:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    buy:SetScript("OnClick", function(_, btn)
+        if btn == "LeftButton" then BuyDeal(r.deal) end
+    end)
     local function BeginSweep(deal)
         if not deal then return end
         S.sweep, S.sweepHeld = true, false
