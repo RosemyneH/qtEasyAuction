@@ -369,6 +369,7 @@ local TAB_LINE = {
     "lining up some listings",
     "watching your auctions",
     "counting sold and spent",
+    "tuning your auction house",
 }
 
 local function PaintSub()
@@ -529,10 +530,12 @@ local function ShowTab(i, quiet)
         S.pages.post:Hide()
         S.pages.mine:Hide()
         if S.pages.stats then S.pages.stats:Hide() end
+        if S.pages.settings then S.pages.settings:Hide() end
         if i == 1 then S.pages.deals:Show()
         elseif i == 2 then S.pages.post:Show()
         elseif i == 3 then S.pages.mine:Show()
-        elseif S.pages.stats then S.pages.stats:Show() end
+        elseif i == 4 and S.pages.stats then S.pages.stats:Show()
+        elseif S.pages.settings then S.pages.settings:Show() end
     end
     if S.tabs then
         for n = 1, #S.tabs do
@@ -552,6 +555,9 @@ local function ShowTab(i, quiet)
     end
     if i == 4 and _G.qtEasyAuctionSales and _G.qtEasyAuctionSales.OnShown then
         _G.qtEasyAuctionSales.OnShown()
+    end
+    if i == 5 and _G.qtEasyAuctionSettings and _G.qtEasyAuctionSettings.OnShown then
+        _G.qtEasyAuctionSettings.OnShown()
     end
 end
 
@@ -611,6 +617,9 @@ function S.Apply(id)
     end
     if _G.qtEasyAuctionSales and _G.qtEasyAuctionSales.ApplySkin then
         _G.qtEasyAuctionSales.ApplySkin()
+    end
+    if _G.qtEasyAuctionSettings and _G.qtEasyAuctionSettings.ApplySkin then
+        _G.qtEasyAuctionSettings.ApplySkin()
     end
 end
 
@@ -792,6 +801,7 @@ function S.Create()
         { "Post", "post" },
         { "Auctions", "auctions" },
         { "Stats", "deals" },
+        { "Settings" },
     }
     local tabW, tabGap = 128, 136
     for i, spec in ipairs(specs) do
@@ -813,7 +823,7 @@ function S.Create()
         p:Hide()
         return p
     end
-    S.pages = { deals = Page(), post = Page(), mine = Page(), stats = Page() }
+    S.pages = { deals = Page(), post = Page(), mine = Page(), stats = Page(), settings = Page() }
 
     local empty = S.pages.deals:CreateTexture(nil, "BACKGROUND")
     Size(empty, 128, 128)
