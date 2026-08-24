@@ -1378,12 +1378,12 @@ local function OnBought(code, detail)
     if S.massLeft and S.massLeft > 0 then
         S.massLeft = S.massLeft - 1
         if code == "OK" then S.massOk = (S.massOk or 0) + 1 end
+        S.massWaiting = nil
         if S.massLeft <= 0 then
-            local bought, total = S.massOk or 0, S.massTotal or 0
-            S.massLeft, S.massTotal, S.massOk = nil, nil, nil
-            SetStatus(string.format("Mass buy done — %d of %d bought. Mail is on the way.", bought, total))
+            FinishMassBuy()
         else
-            SetStatus(string.format("Buying… %d of %d in.", S.massOk or 0, S.massTotal or 0))
+            S.massNextAt = GetTime() + math.max(0, tonumber(AccountDB().bulkBuyDelay) or 0.10)
+            SetStatus(string.format("Buying… %d of %d bought.", S.massOk or 0, S.massTotal or 0))
         end
         return
     end
@@ -1414,6 +1414,50 @@ local function QueueBuy(row)
         name = row.name,
         copper = tonumber(row.buyoutRaw or row.buyout or row.minPriceRaw or row.minPrice) or 0,
     }
+end
+
+FinishMassBuy = function()
+    local bought, total = S.massOk or 0, S.massTotal or 0
+    S.massQueue, S.massWaiting, S.massNextAt = nil, nil, nil
+    S.massLeft, S.massTotal, S.massOk = nil, nil, nil
+    if S.massPump then S.massPump:Hide() end
+    SetStatus(string.format("Mass buy done — %d of %d bought. Mail is on the way.", bought, total))
+end
+
+local function PumpMassBuy()
+    if not S.massQueue or S.massWaiting then return end
+    if S.massNextAt and GetTime() < S.massNextAt then return end
+    local deal = table.remove(S.massQueue, 1)
+    if not deal then
+        FinishMassBuy()
+        return
+    end
+    QueueBuy(deal)
+    S.massWaiting = true
+    SetStatus(string.format("Buying… %d of %d bought.", S.massOk or 0, S.massTotal or 0))
+    local ok = pcall(PeloriaSend, string.format("%s^BUY^%s^%s", C.PREFIX, deal.idRaw, deal.buyoutRaw))
+    if not ok then
+        table.remove(S.pendingBuys, #S.pendingBuys)
+        S.massQueue, S.massWaiting, S.massNextAt = nil, nil, nil
+        S.massLeft, S.massTotal, S.massOk = nil, nil, nil
+        SetStatus("Bulk buying stopped — PeloriaSend failed.")
+        return
+    end
+end
+
+local function StartMassPump()
+    if not S.massPump then
+        S.massPump = CreateFrame("Frame", nil, UIParent)
+        S.massPump:SetScript("OnUpdate", function()
+            if S.massQueue and not S.massWaiting then
+                PumpMassBuy()
+            elseif not S.massQueue then
+                S.massPump:Hide()
+            end
+        end)
+    end
+    S.massPump:Show()
+    PumpMassBuy()
 end
 
 local function HideSweepGold()
@@ -1588,21 +1632,25 @@ local function BuyPicked(list)
         return
     end
     InstallHook()
-    local sent = 0
+    local queue = {}
     for i = 1, #(list or {}) do
         local deal = list[i]
         if CanMassBuy(deal) then
-            QueueBuy(deal)
-            PeloriaSend(string.format("%s^BUY^%s^%s", C.PREFIX, deal.idRaw, deal.buyoutRaw))
-            sent = sent + 1
+            queue[#queue + 1] = deal
         end
     end
-    if sent == 0 then
+    if #queue == 0 then
         SetStatus("Nothing in that sweep can be bought yet.")
         return
     end
-    S.massTotal, S.massOk, S.massLeft = sent, 0, sent
-    SetStatus(string.format("Buying %d listing%s…", sent, sent == 1 and "" or "s"))
+    if S.massQueue or S.massWaiting or #S.pendingBuys > 0 then
+        SetStatus("A bulk purchase is already running.")
+        return
+    end
+    S.massQueue = queue
+    S.massTotal, S.massOk, S.massLeft = #queue, 0, #queue
+    S.massNextAt = 0
+    StartMassPump()
 end
 
 local function PaintMassConfirm()
@@ -2931,6 +2979,10 @@ D.ShowWeights = ShowWeights
 local function BuyDeal(deal)
     if not deal then return end
     if type(PeloriaSend) ~= "function" then return end
+    if S.massQueue or S.massWaiting then
+        SetStatus("Wait for the bulk purchase to finish.")
+        return
+    end
     InstallHook()
     if deal.idRaw and deal.buyoutRaw then
         QueueBuy(deal)
@@ -3423,6 +3475,7 @@ local function CreatePanel()
         ClearSweep()
     end)
     panel:SetScript("OnUpdate", function(_, delta)
+        if S.massQueue and not S.massWaiting then PumpMassBuy() end
         if S.state == "idle" and S.rescoreAt and GetTime() >= S.rescoreAt then
             S.rescoreAt = nil
             if S.summaries and #S.summaries > 0 then
@@ -3430,7 +3483,7 @@ local function CreatePanel()
                 S.scoreIdx, S.scoreKeep = 1, true
             end
         end
-        if S.state == "idle" and not S.sweep then return end
+        if S.state == "idle" and not S.sweep and not S.massQueue then return end
         if S.sweep then
             if IsMouseButtonDown("RightButton") then
                 S.sweepHeld = true
