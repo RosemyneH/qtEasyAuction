@@ -261,7 +261,7 @@ local bagSoon = 0
 local listBusy, listDirty = false, false
 local paintSoon = 0
 local scan = { on = false, bag = 0, slot = 1, items = nil }
-local POST_BATCH, POST_TICK = 80, 0.1
+local POST_TICK = 0.1
 local postJobs, postIdx, postWait, postSent, postRet, postHow, postBagDirty
 local postPump = CreateFrame("Frame", nil, UIParent)
 postPump:Hide()
@@ -367,13 +367,13 @@ local function MythicFromLink(link)
 end
 
 local function MythicFor(bag, slot, link)
-    local D = _G.qtEasyAuctionDeals
-    local v = D and D.BagMythic and D.BagMythic(bag, slot)
-    if v and v > 0 then return v end
-    v = MythicFromLink(link)
+    local v = MythicFromLink(link)
     if v and v > 0 then return v end
     local state = BagItemState(bag, slot, link)
     if state and state.mythic and state.mythic > 0 then return state.mythic end
+    local D = _G.qtEasyAuctionDeals
+    v = D and D.BagMythic and D.BagMythic(bag, slot)
+    if v and v > 0 then return v end
     return 0
 end
 
@@ -390,10 +390,6 @@ function FillItemScore(item)
         return
     end
     local level = MythicFor(item.bag, item.slot, item.link)
-    if (not level or level <= 0) and D.MythicReady and not D.MythicReady() then
-        item.score, item.scoreReady = 0, false
-        return
-    end
     local affix = AffixFromLink(item.link)
     local ok, score, ready = pcall(D.PrimeAndScore, item.itemID, level or 0, affix)
     if not ok then
@@ -615,15 +611,6 @@ end
 local RefreshPostHeads
 local RescoreMissing
 
-local function AskMythicBags()
-    local D = _G.qtEasyAuctionDeals
-    if D and D.AskMythicBags then
-        D.AskMythicBags(function()
-            QueueBagRefresh()
-        end)
-    end
-end
-
 local function SetPostLabel(text)
     if not PAA.button then return end
     if PAA.button.label then
@@ -633,7 +620,6 @@ local function SetPostLabel(text)
     end
 end
 
--- ʕ ● ᴥ ●ʔ✿ 80 SELL packets per 0.1s — server packet cap ✿ ʕ ● ᴥ ●ʔ
 local function SendSell(b, s, stack, stacks, copper, ret)
     if type(PeloriaSend) ~= "function" then return false end
     return pcall(PeloriaSend, string.format(
@@ -660,11 +646,9 @@ end
 local function PumpPost()
     local jobs = postJobs
     if not jobs then return false end
-    local n = 0
-    while n < POST_BATCH and postIdx <= #jobs do
+    while postIdx <= #jobs do
         local job = jobs[postIdx]
         postIdx = postIdx + 1
-        n = n + 1
         if job and SendSell(job.bag, job.slot, job.stack, 1, job.copper, postRet) then
             postSent = postSent + 1
             if _G.qtEasyAuctionSales and _G.qtEasyAuctionSales.NotePost then
@@ -676,12 +660,8 @@ local function PumpPost()
             end
         end
     end
-    if postIdx > #jobs then
-        FinishPost()
-        return false
-    end
-    SetPostLabel(postIdx .. "/" .. #jobs)
-    return true
+    FinishPost()
+    return false
 end
 
 postPump:SetScript("OnUpdate", function(self, delta)
@@ -782,7 +762,7 @@ local function Start()
     else
         postHow = "simple " .. FormatGold(PriceGold()) .. "g"
     end
-    -- ʕノ•ᴥ•ʔノ first 80 leave on the next tick, not inside the click ✿ ʕノ•ᴥ•ʔノ
+    -- ʕノ•ᴥ•ʔノ queued listings leave on the next tick, not inside the click ✿ ʕノ•ᴥ•ʔノ
     postJobs, postIdx, postSent, postWait, postRet = jobs, 1, 0, POST_TICK, ReturnFlag()
     postBagDirty = false
     SetPostLabel("1/" .. #jobs)
@@ -1067,7 +1047,6 @@ local function CreateButton()
     local parent = page or PeloriaAuctionHouseFrame
     local Skin = _G.qtEasyAuctionSkin
 
-    AskMythicBags()
     local dock = CreateFrame("Frame", "PeloriaAutoAuctionDock", parent)
     if page then
         dock:SetAllPoints(page)
@@ -1647,7 +1626,6 @@ _G.qtEasyAuctionPost = {
     OnShown = function()
         CreateButton()
         PAA:RegisterEvent("BAG_UPDATE")
-        AskMythicBags()
         QueueBagRefresh()
         ApplyPostSkin()
         EnsureTick()

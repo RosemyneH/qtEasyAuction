@@ -123,6 +123,8 @@ local S = {
     previewStatusAt = 0,
     previewTries = {},
     previewByEntry = {},
+    itemStats = {},
+    localPreviews = {},
     askTries = {},
     liveDirty = false,
     liveAt = 0,
@@ -518,6 +520,86 @@ local function StatsFromPreview(preview)
     return stats
 end
 
+local ITEM_STAT_KEYS = {
+    ITEM_MOD_STRENGTH_SHORT = "str",
+    ITEM_MOD_AGILITY_SHORT = "agi",
+    ITEM_MOD_STAMINA_SHORT = "sta",
+    ITEM_MOD_INTELLECT_SHORT = "int",
+    ITEM_MOD_SPIRIT_SHORT = "spi",
+    ITEM_MOD_ATTACK_POWER_SHORT = "ap",
+    ITEM_MOD_RANGED_ATTACK_POWER_SHORT = "ap",
+    ITEM_MOD_FERAL_ATTACK_POWER_SHORT = "ap",
+    ITEM_MOD_SPELL_POWER_SHORT = "sp",
+    ITEM_MOD_SPELL_DAMAGE_DONE_SHORT = "sp",
+    ITEM_MOD_SPELL_HEALING_DONE_SHORT = "sp",
+    RESISTANCE0_NAME = "arm",
+    ITEM_MOD_CRIT_RATING_SHORT = "crit",
+    ITEM_MOD_CRIT_MELEE_RATING_SHORT = "crit",
+    ITEM_MOD_CRIT_RANGED_RATING_SHORT = "crit",
+    ITEM_MOD_CRIT_SPELL_RATING_SHORT = "crit",
+    ITEM_MOD_HIT_RATING_SHORT = "hit",
+    ITEM_MOD_HIT_MELEE_RATING_SHORT = "hit",
+    ITEM_MOD_HIT_RANGED_RATING_SHORT = "hit",
+    ITEM_MOD_HIT_SPELL_RATING_SHORT = "hit",
+    ITEM_MOD_HASTE_RATING_SHORT = "haste",
+    ITEM_MOD_HASTE_MELEE_RATING_SHORT = "haste",
+    ITEM_MOD_HASTE_RANGED_RATING_SHORT = "haste",
+    ITEM_MOD_HASTE_SPELL_RATING_SHORT = "haste",
+    ITEM_MOD_EXPERTISE_RATING_SHORT = "exp",
+    ITEM_MOD_MANA_REGENERATION_SHORT = "mp5",
+    ITEM_MOD_ARMOR_PENETRATION_RATING_SHORT = "raw",
+}
+
+local function MythicMultiplier(level)
+    level = math.max(1, math.min(50, tonumber(level) or 1))
+    return 1 + (level - 1) / 98
+end
+
+local function LocalPreview(entry, level, affix)
+    if type(GetItemStats) ~= "function" then return nil end
+    local key = PreviewKey(entry, level, affix)
+    if S.localPreviews[key] then return S.localPreviews[key] end
+    local link = ItemLink(entry, affix)
+    if not GetItemInfo(link) then
+        if PrimeItemCache then PrimeItemCache(entry) end
+        return nil
+    end
+    local base = S.itemStats[link]
+    if not base then
+        base = GetItemStats(link)
+        if type(base) ~= "table" then return nil end
+        S.itemStats[link] = base
+    end
+    local totals = {}
+    for stat, value in pairs(base) do
+        local canon = ITEM_STAT_KEYS[stat]
+        value = tonumber(value)
+        if canon and value and value > 0 then
+            totals[canon] = (totals[canon] or 0) + value
+        end
+    end
+    local rows = {}
+    local scale = MythicMultiplier(level)
+    for i = 1, #STAT_KEYS do
+        local stat = STAT_KEYS[i]
+        local value = totals[stat]
+        if value and value > 0 then
+            if stat == "sta" then value = value * 2 end
+            rows[#rows + 1] = {
+                name = STAT_LABEL[stat],
+                value = math.floor(value * scale + 0.5),
+            }
+        end
+    end
+    if #rows == 0 then
+        S.peekWrapped.empty = S.peekWrapped.empty or {}
+        S.peekWrapped.empty[key] = true
+        return nil
+    end
+    S.localPreviews[key] = rows
+    return rows
+end
+
 local function PreviewHasStats(preview)
     local stats = StatsFromPreview(preview)
     for i = 1, #STAT_KEYS do
@@ -553,7 +635,9 @@ end
 
 local function CachedPreview(entry, level, affix)
     affix = AffixForSoulbind(affix)
-    local hit = AsPreviewRows((PeekNative(entry, level, affix)))
+    local hit = LocalPreview(entry, level, affix)
+    if hit then return hit end
+    hit = AsPreviewRows((PeekNative(entry, level, affix)))
     if hit then return hit end
     if affix ~= 0 then
         hit = AsPreviewRows((PeekNative(entry, level, 0)))
@@ -592,7 +676,6 @@ local function LiveFlights()
     return n
 end
 
--- ʕ •ᴥ•ʔ✿ same request PeloriaUI uses on tooltip hover ✿ ʕ •ᴥ•ʔ
 local function AskPreview(entry, level, affix)
     if CachedPreview(entry, level, affix) then return true end
     local key = PreviewKey(entry, level, affix)
@@ -600,37 +683,6 @@ local function AskPreview(entry, level, affix)
     local now = GetTime()
     if S.flight[key] and now < S.flight[key] then return false end
     S.flight[key] = now + C.FLY_WAIT
-    S.peekWrapped.sent = S.peekWrapped.sent or {}
-    local again = S.peekWrapped.sent[key]
-    S.peekWrapped.sent[key] = true
-    local p = PeekNative(entry, level, affix)
-    local empty = p ~= nil and not PreviewHasStats(p)
-    if empty then
-        PeloriaSoulbindPreviews = PeloriaSoulbindPreviews or {}
-        PeloriaSoulbindPreviews[key] = nil
-    end
-    if not again and type(PeloriaRequestSoulbindPreview) == "function" then
-        local got = PeloriaRequestSoulbindPreview(entry, level, affix)
-        if PreviewHasStats(got) then
-            local rows = AsPreviewRows(got) or got
-            S.previewByEntry = S.previewByEntry or {}
-            S.previewByEntry[entry] = rows
-            PeloriaSoulbindPreviews = PeloriaSoulbindPreviews or {}
-            PeloriaSoulbindPreviews[key] = rows
-            S.flight[key] = nil
-            return true
-        end
-        if got == nil then
-            if CachedPreview(entry, level, affix) then
-                S.flight[key] = nil
-                return true
-            end
-            return false
-        end
-    end
-    if type(PeloriaSend) == "function" then
-        PeloriaSend("ATTN^PREVIEW^" .. entry .. "^" .. level .. "^" .. affix)
-    end
     if CachedPreview(entry, level, affix) then
         S.flight[key] = nil
         return true
