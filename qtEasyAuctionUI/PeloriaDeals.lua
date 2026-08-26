@@ -551,8 +551,7 @@ local ITEM_STAT_KEYS = {
 }
 
 local function MythicMultiplier(level)
-    level = math.max(1, math.min(50, tonumber(level) or 1))
-    return 1 + (level - 1) / 98
+    return 1 + math.max(0, tonumber(level) or 0) / 200
 end
 
 local function LocalPreview(entry, level, affix)
@@ -587,7 +586,7 @@ local function LocalPreview(entry, level, affix)
             if stat == "sta" then value = value * 2 end
             rows[#rows + 1] = {
                 name = STAT_LABEL[stat],
-                value = math.floor(value * scale + 0.5),
+                value = math.floor(value * scale),
             }
         end
     end
