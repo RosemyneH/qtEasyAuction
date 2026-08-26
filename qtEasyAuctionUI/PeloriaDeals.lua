@@ -181,6 +181,30 @@ local function IsSellerHidden(name)
     return key ~= "" and AccountDB().hiddenSellers[key] ~= nil
 end
 
+local HIDE_SELLER_POPUP = "QTEASYAUCTION_HIDE_SELLER"
+StaticPopupDialogs[HIDE_SELLER_POPUP] = {
+    text = "Hide every listing from %s?",
+    button1 = "Hide seller",
+    button2 = CANCEL,
+    OnAccept = function(_, data)
+        AccountDB().hiddenSellers[data.key] = data.owner
+        SetStatus("Hidden listings from " .. data.owner .. ".")
+        ApplyFilter()
+        local settings = _G.qtEasyAuctionSettings
+        if settings and settings.Refresh then settings.Refresh() end
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
+local function ConfirmHideSeller(owner)
+    local key = SellerKey(owner)
+    if key == "" then return end
+    StaticPopup_Show(HIDE_SELLER_POPUP, owner, nil, { key = key, owner = owner })
+end
+
 local function NextGen()
     C.GEN = C.GEN + 1
     return C.GEN
@@ -3218,7 +3242,7 @@ local function CreateRow(parent)
         end
     end)
     buy:SetScript("OnMouseDown", function(_, btn)
-        if btn == "RightButton" and IsShiftKeyDown() then BeginSweep(r.deal) end
+        if btn == "RightButton" and IsShiftKeyDown() and not IsAltKeyDown() then BeginSweep(r.deal) end
     end)
     buy:SetScript("OnMouseUp", function(_, btn)
         if btn == "RightButton" then
@@ -3227,7 +3251,7 @@ local function CreateRow(parent)
     end)
     r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     r:SetScript("OnMouseDown", function(self, btn)
-        if btn == "RightButton" and IsShiftKeyDown() then BeginSweep(self.deal) end
+        if btn == "RightButton" and IsShiftKeyDown() and not IsAltKeyDown() then BeginSweep(self.deal) end
     end)
     r:SetScript("OnMouseUp", function(self, btn)
         if btn ~= "RightButton" then return end
@@ -3235,14 +3259,7 @@ local function CreateRow(parent)
             FinishSweep()
             return
         end
-        local owner = self.deal and self.deal.owner
-        local key = SellerKey(owner)
-        if key == "" then return end
-        AccountDB().hiddenSellers[key] = owner
-        SetStatus("Hidden listings from " .. owner .. ".")
-        ApplyFilter()
-        local settings = _G.qtEasyAuctionSettings
-        if settings and settings.Refresh then settings.Refresh() end
+        if IsAltKeyDown() then ConfirmHideSeller(self.deal and self.deal.owner) end
     end)
     r:SetScript("OnEnter", function(self)
         if S.sweep then

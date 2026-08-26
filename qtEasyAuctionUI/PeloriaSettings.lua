@@ -209,7 +209,7 @@ local function CreatePanel()
 
     local hint = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     hint:SetPoint("TOPLEFT", hiddenTitle, "BOTTOMLEFT", 0, -6)
-    hint:SetText("Right-click a deal to hide every listing from that seller.")
+    hint:SetText("Alt-right-click a deal to confirm hiding every listing from that seller.")
     T.hint = hint
 
     local list = CreateFrame("Frame", nil, panel)
