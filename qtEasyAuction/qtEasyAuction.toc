@@ -1,8 +1,8 @@
 ## Interface: 30300
-## Title: qt|cffff8a00Easy|cffffa000Auction|r - |cffffd45aBeta 2|r
+## Title: qt|cffff8a00Easy|cffffa000Auction|r - |cffffd45aBeta 3|r
 ## Notes: Cute Peloria AH skin, soulbind deals, auto-post
 ## Author: Qt
-## Version: 2.0.0-beta.2
+## Version: 2.0.0-beta.3
 ## SavedVariables: qtEasyAuctionDB
 ## SavedVariablesPerCharacter: qtEasyAuctionCharDB
 ## OptionalDeps: qtEasyAuctionUI
