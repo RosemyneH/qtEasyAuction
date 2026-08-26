@@ -10,6 +10,7 @@ local function DB()
     qtEasyAuctionDB.hiddenSellers = qtEasyAuctionDB.hiddenSellers or {}
     qtEasyAuctionDB.bulkBuyDelay = tonumber(qtEasyAuctionDB.bulkBuyDelay) or 0.10
     if qtEasyAuctionDB.confirmMassBuy == nil then qtEasyAuctionDB.confirmMassBuy = true end
+    if qtEasyAuctionDB.hideDuplicateDeals == nil then qtEasyAuctionDB.hideDuplicateDeals = true end
     return qtEasyAuctionDB
 end
 
@@ -43,6 +44,10 @@ local function Paint()
     if T.confirm then
         if T.confirm.SetOn then T.confirm:SetOn(DB().confirmMassBuy)
         else T.confirm:SetChecked(DB().confirmMassBuy) end
+    end
+    if T.duplicates then
+        if T.duplicates.SetOn then T.duplicates:SetOn(DB().hideDuplicateDeals)
+        else T.duplicates:SetChecked(DB().hideDuplicateDeals) end
     end
     for i = 1, ROW_MAX do
         local row = T.rows[i]
@@ -158,6 +163,31 @@ local function CreatePanel()
     end
     T.confirm = confirm
 
+    local duplicates
+    if Skin and Skin.Chip then
+        duplicates = Skin.Chip(panel, 190, 28, "Hide duplicate item levels", true)
+        duplicates:SetPoint("LEFT", confirm, "RIGHT", 8, 0)
+        duplicates.OnToggle = function(self, on)
+            DB().hideDuplicateDeals = on and true or false
+            self:SetOn(DB().hideDuplicateDeals)
+            RefreshDeals()
+        end
+        duplicates:SetOn(DB().hideDuplicateDeals)
+    else
+        duplicates = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+        duplicates:SetPoint("LEFT", confirm, "RIGHT", 8, 0)
+        local label = duplicates:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        label:SetPoint("LEFT", duplicates, "RIGHT", 2, 0)
+        label:SetText("Hide duplicate item levels")
+        duplicates:SetChecked(DB().hideDuplicateDeals)
+        duplicates:SetScript("OnClick", function(self)
+            DB().hideDuplicateDeals = self:GetChecked() and true or false
+            RefreshDeals()
+        end)
+        duplicates.label = label
+    end
+    T.duplicates = duplicates
+
     local hiddenTitle = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     hiddenTitle:SetPoint("TOPLEFT", 18, -126)
     hiddenTitle:SetText("Hidden sellers")
@@ -244,6 +274,7 @@ function T.ApplySkin()
     end
     if T.delayLabel then T.delayLabel:SetTextColor(pal.cream[1], pal.cream[2], pal.cream[3]) end
     if T.confirm and T.confirm.PaintTheme then T.confirm:PaintTheme() end
+    if T.duplicates and T.duplicates.PaintTheme then T.duplicates:PaintTheme() end
     for i = 1, #(T.rows or {}) do
         local tint = (i % 2 == 0) and pal.rowA or pal.rowB
         T.rows[i].bg:SetVertexColor(tint[1], tint[2], tint[3], tint[4] or 1)

@@ -165,6 +165,7 @@ local function AccountDB()
     qtEasyAuctionDB.hiddenSellers = qtEasyAuctionDB.hiddenSellers or {}
     qtEasyAuctionDB.bulkBuyDelay = tonumber(qtEasyAuctionDB.bulkBuyDelay) or 0.10
     if qtEasyAuctionDB.confirmMassBuy == nil then qtEasyAuctionDB.confirmMassBuy = true end
+    if qtEasyAuctionDB.hideDuplicateDeals == nil then qtEasyAuctionDB.hideDuplicateDeals = true end
     return qtEasyAuctionDB
 end
 
@@ -1222,12 +1223,37 @@ local function DealMatches(deal, q)
     return string.find(name, q, 1, true) or string.find(seller, q, 1, true)
 end
 
+local function DuplicateKey(deal)
+    return tostring(deal.entry or 0) .. ":" .. tostring(tonumber(deal.mythic) or 0)
+end
+
+local function IsBetterDeal(deal, current)
+    local ratio, currentRatio = tonumber(deal.perGold) or 0, tonumber(current.perGold) or 0
+    if ratio ~= currentRatio then return ratio > currentRatio end
+    local price, currentPrice = tonumber(deal.minPrice) or math.huge, tonumber(current.minPrice) or math.huge
+    if price ~= currentPrice then return price < currentPrice end
+    return (tonumber(deal.total) or 0) > (tonumber(current.total) or 0)
+end
+
 function ApplyFilter(keepOffset)
     local q = string.lower(CleanQuery(S.filterText))
     S.deals = {}
+    local unique = AccountDB().hideDuplicateDeals and {} or nil
     for i = 1, #(S.allDeals or {}) do
-        if DealMatches(S.allDeals[i], q) then
-            S.deals[#S.deals + 1] = S.allDeals[i]
+        local deal = S.allDeals[i]
+        if DealMatches(deal, q) then
+            if unique then
+                local key = DuplicateKey(deal)
+                local index = unique[key]
+                if not index then
+                    S.deals[#S.deals + 1] = deal
+                    unique[key] = #S.deals
+                elseif IsBetterDeal(deal, S.deals[index]) then
+                    S.deals[index] = deal
+                end
+            else
+                S.deals[#S.deals + 1] = deal
+            end
         end
     end
     ApplySort()
