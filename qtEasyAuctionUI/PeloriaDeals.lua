@@ -3107,12 +3107,23 @@ local function EnsureInfoTip()
     if not S.infoTip then
         S.infoTip = CreateFrame("GameTooltip", "qtEasyAuctionInfoTip", UIParent, "GameTooltipTemplate")
         S.infoTip:SetFrameStrata("TOOLTIP")
-        S.infoTip:SetScript("OnShow", function(self)
-            self:ClearAllPoints()
-            self:SetPoint("TOPLEFT", GameTooltip, "TOPRIGHT", 6, 0)
-        end)
     end
     return S.infoTip
+end
+
+local function PlaceInfoTip(tip)
+    local uiLeft = UIParent:GetLeft() or 0
+    local uiRight = UIParent:GetRight() or (uiLeft + (UIParent:GetWidth() or 0))
+    local itemLeft, itemRight = GameTooltip:GetLeft() or 0, GameTooltip:GetRight() or 0
+    local width = tip:GetWidth() or 0
+    tip:ClearAllPoints()
+    if itemRight + width + 6 <= uiRight then
+        tip:SetPoint("TOPLEFT", GameTooltip, "TOPRIGHT", 6, 0)
+    elseif itemLeft - width - 6 >= uiLeft then
+        tip:SetPoint("TOPRIGHT", GameTooltip, "TOPLEFT", -6, 0)
+    else
+        tip:SetPoint("TOPLEFT", GameTooltip, "BOTTOMLEFT", 0, -6)
+    end
 end
 
 local function HideTips()
@@ -3134,7 +3145,8 @@ local function ShowDealTips(row)
     local tip = EnsureInfoTip()
     tip:ClearLines()
     tip:SetOwner(GameTooltip, "ANCHOR_NONE")
-    tip:SetPoint("TOPLEFT", GameTooltip, "TOPRIGHT", 6, 0)
+    tip:ClearAllPoints()
+    tip:SetPoint("TOPRIGHT", GameTooltip, "TOPLEFT", -6, 0)
     tip:AddLine("Deal math", 0.95, 0.82, 0.55)
     tip:AddDoubleLine("Mythic", MythicTag(deal.mythic, deal.mythicMax), 0.75, 0.75, 0.8, 0.4, 1, 0.4)
     local gold = deal.gold or GoldRaw(deal.minPrice)
@@ -3172,6 +3184,7 @@ local function ShowDealTips(row)
         tip:AddDoubleLine("Seller", deal.owner, 0.7, 0.7, 0.75, 1, 0.82, 0.4)
     end
     tip:Show()
+    PlaceInfoTip(tip)
 end
 
 local function CreateRow(parent)
