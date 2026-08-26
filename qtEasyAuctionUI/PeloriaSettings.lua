@@ -9,6 +9,7 @@ local function DB()
     qtEasyAuctionDB = qtEasyAuctionDB or {}
     qtEasyAuctionDB.hiddenSellers = qtEasyAuctionDB.hiddenSellers or {}
     qtEasyAuctionDB.bulkBuyDelay = tonumber(qtEasyAuctionDB.bulkBuyDelay) or 0.10
+    if qtEasyAuctionDB.confirmMassBuy == nil then qtEasyAuctionDB.confirmMassBuy = true end
     return qtEasyAuctionDB
 end
 
@@ -38,6 +39,10 @@ local function Paint()
     end
     if T.hiddenCount then
         T.hiddenCount:SetText(#hidden == 1 and "1 hidden seller" or (#hidden .. " hidden sellers"))
+    end
+    if T.confirm then
+        if T.confirm.SetOn then T.confirm:SetOn(DB().confirmMassBuy)
+        else T.confirm:SetChecked(DB().confirmMassBuy) end
     end
     for i = 1, ROW_MAX do
         local row = T.rows[i]
@@ -130,6 +135,29 @@ local function CreatePanel()
     seconds:SetText("seconds")
     T.seconds = seconds
 
+    local confirm
+    if Skin and Skin.Chip then
+        confirm = Skin.Chip(panel, 164, 28, "Confirm mass buys", true)
+        confirm:SetPoint("LEFT", seconds, "RIGHT", 20, 0)
+        confirm.OnToggle = function(self, on)
+            DB().confirmMassBuy = on and true or false
+            self:SetOn(DB().confirmMassBuy)
+        end
+        confirm:SetOn(DB().confirmMassBuy)
+    else
+        confirm = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+        confirm:SetPoint("LEFT", seconds, "RIGHT", 20, 0)
+        local label = confirm:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        label:SetPoint("LEFT", confirm, "RIGHT", 2, 0)
+        label:SetText("Confirm mass buys")
+        confirm:SetChecked(DB().confirmMassBuy)
+        confirm:SetScript("OnClick", function(self)
+            DB().confirmMassBuy = self:GetChecked() and true or false
+        end)
+        confirm.label = label
+    end
+    T.confirm = confirm
+
     local hiddenTitle = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     hiddenTitle:SetPoint("TOPLEFT", 18, -126)
     hiddenTitle:SetText("Hidden sellers")
@@ -215,6 +243,7 @@ function T.ApplySkin()
         if muted[i] then muted[i]:SetTextColor(pal.mute[1], pal.mute[2], pal.mute[3]) end
     end
     if T.delayLabel then T.delayLabel:SetTextColor(pal.cream[1], pal.cream[2], pal.cream[3]) end
+    if T.confirm and T.confirm.PaintTheme then T.confirm:PaintTheme() end
     for i = 1, #(T.rows or {}) do
         local tint = (i % 2 == 0) and pal.rowA or pal.rowB
         T.rows[i].bg:SetVertexColor(tint[1], tint[2], tint[3], tint[4] or 1)

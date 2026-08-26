@@ -164,6 +164,7 @@ local function AccountDB()
     qtEasyAuctionDB = qtEasyAuctionDB or {}
     qtEasyAuctionDB.hiddenSellers = qtEasyAuctionDB.hiddenSellers or {}
     qtEasyAuctionDB.bulkBuyDelay = tonumber(qtEasyAuctionDB.bulkBuyDelay) or 0.10
+    if qtEasyAuctionDB.confirmMassBuy == nil then qtEasyAuctionDB.confirmMassBuy = true end
     return qtEasyAuctionDB
 end
 
@@ -1879,7 +1880,12 @@ local function FinishSweep()
     HideSweepGold()
     local list = S.sweepOrder
     if list and #list > 0 then
-        ShowMassConfirm(list)
+        if AccountDB().confirmMassBuy then
+            ShowMassConfirm(list)
+        else
+            ClearSweep()
+            BuyPicked(list)
+        end
     else
         ClearSweep()
     end
