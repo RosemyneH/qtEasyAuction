@@ -217,7 +217,12 @@ StaticPopupDialogs[HIDE_SELLER_POPUP] = {
 local function ConfirmHideSeller(owner)
     local key = SellerKey(owner)
     if key == "" then return end
-    StaticPopup_Show(HIDE_SELLER_POPUP, owner, nil, { key = key, owner = owner })
+    local popup = StaticPopup_Show(HIDE_SELLER_POPUP, owner, nil, { key = key, owner = owner })
+    if popup then
+        popup:SetFrameStrata("TOOLTIP")
+        popup:SetFrameLevel(300)
+        popup:Raise()
+    end
 end
 
 local function NextGen()
@@ -3291,25 +3296,41 @@ local function CreateRow(parent)
             Paint()
         end
     end)
-    buy:SetScript("OnMouseDown", function(_, btn)
+    buy:SetScript("OnMouseDown", function(self, btn)
+        if btn == "RightButton" and IsAltKeyDown() then
+            ConfirmHideSeller(r.deal and r.deal.owner)
+            self.hideSellerClick = true
+            return
+        end
         if btn == "RightButton" and IsShiftKeyDown() and not IsAltKeyDown() then BeginSweep(r.deal) end
     end)
-    buy:SetScript("OnMouseUp", function(_, btn)
+    buy:SetScript("OnMouseUp", function(self, btn)
         if btn == "RightButton" then
+            if self.hideSellerClick then
+                self.hideSellerClick = nil
+                return
+            end
             if S.sweep then FinishSweep() end
         end
     end)
     r:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     r:SetScript("OnMouseDown", function(self, btn)
+        if btn == "RightButton" and IsAltKeyDown() then
+            ConfirmHideSeller(self.deal and self.deal.owner)
+            self.hideSellerClick = true
+            return
+        end
         if btn == "RightButton" and IsShiftKeyDown() and not IsAltKeyDown() then BeginSweep(self.deal) end
     end)
     r:SetScript("OnMouseUp", function(self, btn)
         if btn ~= "RightButton" then return end
-        if S.sweep then
-            FinishSweep()
+        if self.hideSellerClick then
+            self.hideSellerClick = nil
             return
         end
-        if IsAltKeyDown() then ConfirmHideSeller(self.deal and self.deal.owner) end
+        if S.sweep then
+            FinishSweep()
+        end
     end)
     r:SetScript("OnEnter", function(self)
         if S.sweep then
