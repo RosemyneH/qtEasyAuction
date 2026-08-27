@@ -1,0 +1,15 @@
+## Interface: 30300
+## Title: qt|cffff8a00Easy|cffffa000Auction|r [|cff808080AH UI|r]
+## Notes: Loaded automatically when you open the auction house
+## Author: Qt
+## Version: 2.0.0
+## LoadOnDemand: 1
+## Dependencies: qtEasyAuction
+## OptionalDeps: LibSharedMedia-3.0
+## X-Child-Of: qtEasyAuction
+
+PeloriaAutoAuction.lua
+PeloriaDeals.lua
+PeloriaAuctions.lua
+PeloriaSettings.lua
+PeloriaSkin.lua
