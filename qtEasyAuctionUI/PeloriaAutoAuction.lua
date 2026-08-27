@@ -391,6 +391,13 @@ function FillItemScore(item)
     end
     local level = MythicFor(item.bag, item.slot, item.link)
     local affix = AffixFromLink(item.link)
+    if affix ~= 0 and D.ScoreItemLink then
+        local ok, score, ready = pcall(D.ScoreItemLink, item.link, level or 0)
+        if ok and ready then
+            item.score, item.scoreReady = score or 0, true
+            return
+        end
+    end
     local ok, score, ready = pcall(D.PrimeAndScore, item.itemID, level or 0, affix)
     if not ok then
         if not scoreWarned then

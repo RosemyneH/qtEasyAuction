@@ -600,21 +600,8 @@ local function MythicMultiplier(level)
     return 1 + math.max(0, tonumber(level) or 0) / 200
 end
 
-local function LocalPreview(entry, level, affix)
-    if type(GetItemStats) ~= "function" then return nil end
-    local key = PreviewKey(entry, level, affix)
-    if S.localPreviews[key] then return S.localPreviews[key] end
-    local link = ItemLink(entry, affix)
-    if not GetItemInfo(link) then
-        if PrimeItemCache then PrimeItemCache(entry) end
-        return nil
-    end
-    local base = S.itemStats[link]
-    if not base then
-        base = GetItemStats(link)
-        if type(base) ~= "table" then return nil end
-        S.itemStats[link] = base
-    end
+local function PreviewFromItemStats(base, level)
+    if type(base) ~= "table" then return nil end
     local totals = {}
     for stat, value in pairs(base) do
         local canon = ITEM_STAT_KEYS[stat]
@@ -636,7 +623,26 @@ local function LocalPreview(entry, level, affix)
             }
         end
     end
-    if #rows == 0 then
+    if #rows > 0 then return rows end
+end
+
+local function LocalPreview(entry, level, affix)
+    if type(GetItemStats) ~= "function" then return nil end
+    local key = PreviewKey(entry, level, affix)
+    if S.localPreviews[key] then return S.localPreviews[key] end
+    local link = ItemLink(entry, affix)
+    if not GetItemInfo(link) then
+        if PrimeItemCache then PrimeItemCache(entry) end
+        return nil
+    end
+    local base = S.itemStats[link]
+    if not base then
+        base = GetItemStats(link)
+        if type(base) ~= "table" then return nil end
+        S.itemStats[link] = base
+    end
+    local rows = PreviewFromItemStats(base, level)
+    if not rows then
         S.peekWrapped.empty = S.peekWrapped.empty or {}
         S.peekWrapped.empty[key] = true
         return nil
@@ -1131,6 +1137,13 @@ local function WeightedScore(stats, kind)
         if part > bestPart then bestPart, bestKey = part, k end
     end
     return score, bestKey
+end
+
+function D.ScoreItemLink(link, level)
+    if type(GetItemStats) ~= "function" or not link then return 0, false end
+    local preview = PreviewFromItemStats(GetItemStats(link), level)
+    if not preview then return 0, false end
+    return WeightedScore(StatsFromPreview(preview), "post"), true
 end
 
 function D.PrimeAndScore(entry, level, affix)
