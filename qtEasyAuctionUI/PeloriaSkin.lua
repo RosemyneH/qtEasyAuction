@@ -1222,7 +1222,7 @@ function S.Create()
     themeBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     local uiToggle = S.CuteButton(UIParent, 88, 28, "Default UI")
-    uiToggle:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -176, -16)
+    uiToggle:SetPoint("RIGHT", themeBtn, "LEFT", -8, 0)
     uiToggle:SetFrameStrata(host:GetFrameStrata())
     uiToggle:SetFrameLevel((host:GetFrameLevel() or 1) + 40)
     uiToggle:SetScript("OnClick", function()
