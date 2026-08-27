@@ -214,6 +214,7 @@ S.themeId = "crypt"
 
 local charRef
 local FONT_BASE = setmetatable({}, { __mode = "k" })
+local FONT_PREVIEW = setmetatable({}, { __mode = "k" })
 local FONT_ROOTS = setmetatable({}, { __mode = "k" })
 local DEFAULT_FONT = "Default"
 local MIN_W, MIN_H = 760, 520
@@ -413,7 +414,14 @@ local function ApplyFontObject(obj, path, scale)
         base = { font = font, size = size, flags = flags }
         FONT_BASE[obj] = base
     end
-    pcall(obj.SetFont, obj, path or base.font, math.max(6, base.size * scale), base.flags)
+    local preview = FONT_PREVIEW[obj]
+    local font = preview ~= nil and (preview or base.font) or (path or base.font)
+    pcall(obj.SetFont, obj, font, math.max(6, base.size * scale), base.flags)
+end
+
+function S.SetFontPreview(obj, name)
+    FONT_PREVIEW[obj] = FontPath(name) or false
+    ApplyFontObject(obj, FontPath(S.FontName()), S.FontScale())
 end
 
 local function ApplyFontTree(frame, path, scale, seen)
@@ -645,7 +653,7 @@ function S.Dropdown(parent, w, h, value, options, onSelect)
 
     local arrow = b:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     arrow:SetPoint("RIGHT", -10, 1)
-    arrow:SetText("▼")
+    arrow:SetText("v")
     b.arrow = arrow
 
     local menu = CreateFrame("Frame", nil, UIParent)
@@ -654,6 +662,7 @@ function S.Dropdown(parent, w, h, value, options, onSelect)
     Stroke(menu)
     menu:SetFrameStrata("TOOLTIP")
     menu:SetFrameLevel(220)
+    menu:SetToplevel(true)
     menu:EnableMouse(true)
     menu:EnableMouseWheel(true)
     menu:Hide()
@@ -665,6 +674,7 @@ function S.Dropdown(parent, w, h, value, options, onSelect)
     for i = 1, rowMax do
         local row = S.CuteButton(menu, w - 4, rowHeight - 2, "")
         row:SetPoint("TOPLEFT", 2, -2 - (i - 1) * rowHeight)
+        row:SetFrameLevel(menu:GetFrameLevel() + i)
         row.label:ClearAllPoints()
         row.label:SetJustifyH("LEFT")
         row.label:SetPoint("LEFT", 8, 0)
@@ -693,6 +703,7 @@ function S.Dropdown(parent, w, h, value, options, onSelect)
             if option then
                 row.value = option
                 row.label:SetText(option)
+                S.SetFontPreview(row.label, option)
                 row:SetLocked(option == self.value)
                 row:Show()
             else
