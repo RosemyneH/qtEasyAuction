@@ -751,7 +751,7 @@ function S.Dropdown(parent, w, h, value, options, onSelect)
     end
 
     menu:SetScript("OnMouseWheel", function(_, delta)
-        local nextOffset = math.max(0, math.min(menuOffset - delta, maxOffset))
+        local nextOffset = math.max(0, math.min(menuOffset + delta, maxOffset))
         if nextOffset == menuOffset then return end
         menuOffset = nextOffset
         b:Refresh()
