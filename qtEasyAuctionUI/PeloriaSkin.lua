@@ -675,22 +675,50 @@ function S.Dropdown(parent, w, h, value, options, onSelect)
     S.RegisterFontRoot(menu)
     b.menu = menu
 
-    local rowHeight, rowMax, menuOffset = h, 10, 0
+    local rowHeight, rowMax, menuOffset, maxOffset = h, 10, 0, 0
+    local visibleRows = {}
     menu.rows = {}
-    for i = 1, rowMax do
-        local row = S.CuteButton(menu, w - 4, rowHeight - 2, "")
-        row:SetPoint("TOPLEFT", 2, -2 - (i - 1) * rowHeight)
-        row:SetFrameLevel(menu:GetFrameLevel() + i)
+
+    local bar = CreateFrame("Slider", nil, menu)
+    bar:SetPoint("TOPRIGHT", -3, -3)
+    bar:SetPoint("BOTTOMRIGHT", -3, 3)
+    bar:SetWidth(14)
+    bar:SetFrameLevel(menu:GetFrameLevel() + 3)
+    bar:SetOrientation("VERTICAL")
+    bar:SetValueStep(1)
+    bar.track = Fill(bar, "BACKGROUND", C.rowB)
+    bar.thumb = bar:CreateTexture(nil, "ARTWORK")
+    bar.thumb:SetTexture(WHITE)
+    Size(bar.thumb, 10, 28)
+    bar:SetThumbTexture(bar.thumb)
+    bar:Hide()
+    menu.bar = bar
+
+    local function OptionRow(index, option)
+        local row = menu.rows[index]
+        if row then
+            if row.value ~= option then
+                row.value = option
+                row.label:SetText(option)
+                S.SetFontPreview(row.label, option)
+            end
+            return row
+        end
+        row = S.CuteButton(menu, w - 20, rowHeight - 2, option)
+        row:SetFrameLevel(menu:GetFrameLevel() + 2)
         row.label:ClearAllPoints()
         row.label:SetJustifyH("LEFT")
         row.label:SetPoint("LEFT", 8, 0)
         row.label:SetPoint("RIGHT", -8, 0)
+        row.value = option
+        S.SetFontPreview(row.label, option)
         row:SetScript("OnClick", function(self)
             b:SetValue(self.value)
             menu:Hide()
             if onSelect then onSelect(self.value) end
         end)
-        menu.rows[i] = row
+        menu.rows[index] = row
+        return row
     end
 
     function b:SetValue(nextValue)
@@ -701,27 +729,36 @@ function S.Dropdown(parent, w, h, value, options, onSelect)
     function b:Refresh()
         local values = type(options) == "function" and options() or options or {}
         local visible = math.min(rowMax, #values)
-        menuOffset = math.max(0, math.min(menuOffset, math.max(0, #values - visible)))
+        maxOffset = math.max(0, #values - visible)
+        menuOffset = math.max(0, math.min(menuOffset, maxOffset))
         menu:SetHeight(math.max(4, visible * rowHeight + 4))
-        for i = 1, rowMax do
-            local row = menu.rows[i]
-            local option = values[menuOffset + i]
-            if option then
-                row.value = option
-                row.label:SetText(option)
-                S.SetFontPreview(row.label, option)
-                row:SetLocked(option == self.value)
-                row:Show()
-            else
-                row.value = nil
-                row:Hide()
-            end
+        for i = 1, #visibleRows do visibleRows[i]:Hide() end
+        visibleRows = {}
+        for i = 1, visible do
+            local index = menuOffset + i
+            local row = OptionRow(index, values[index])
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", 2, -2 - (i - 1) * rowHeight)
+            row:SetLocked(row.value == self.value)
+            row:Show()
+            visibleRows[i] = row
         end
+        menu.syncingBar = true
+        bar:SetMinMaxValues(0, maxOffset)
+        bar:SetValue(maxOffset - menuOffset)
+        menu.syncingBar = nil
+        if maxOffset > 0 then bar:Show() else bar:Hide() end
     end
 
     menu:SetScript("OnMouseWheel", function(_, delta)
-        local values = type(options) == "function" and options() or options or {}
-        local nextOffset = math.max(0, math.min(menuOffset - delta, math.max(0, #values - rowMax)))
+        local nextOffset = math.max(0, math.min(menuOffset - delta, maxOffset))
+        if nextOffset == menuOffset then return end
+        menuOffset = nextOffset
+        b:Refresh()
+    end)
+    bar:SetScript("OnValueChanged", function(_, nextValue)
+        if menu.syncingBar then return end
+        local nextOffset = math.floor(maxOffset - (nextValue or 0) + 0.5)
         if nextOffset == menuOffset then return end
         menuOffset = nextOffset
         b:Refresh()
@@ -753,6 +790,8 @@ function S.Dropdown(parent, w, h, value, options, onSelect)
         Ink(self.arrow, C.cream)
         Tint(menu.bg, C.panel)
         PaintStroke(menu, C.accent)
+        Tint(bar.track, C.rowB)
+        Tint(bar.thumb, C.accent)
     end
     b:SetValue(value)
     b:PaintTheme()
