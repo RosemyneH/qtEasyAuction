@@ -4,47 +4,48 @@
 
 A responsive replacement interface for Peloria's Auction House with weighted deal discovery, score-based posting, auction management, sales tracking, bulk buying, and configurable themes.
 
-## What's new
+## 2.0.0 highlights
 
-### Deal filtering
+### Configurable deal discovery
 
-- Deals below a configurable **Gold value** score are hidden by default.
-- The default threshold is **30 score per gold**.
-- The filter can be toggled or edited immediately from Settings.
-- Duplicate item-level deals are collapsed to their best listing.
+- Filter deals by a configurable minimum **Gold value**, defaulting to 30 score per gold.
+- Collapse duplicate item-level deals to the best available listing.
+- Hide individual sellers with Alt-right-click and restore them from Settings.
+- Search, re-scan, sort, inspect, and bulk-select current listings.
 
-### Seller controls
+### Score-based posting
 
-- Alt-right-click a deal row or its Buy button to hide that seller.
-- A confirmation appears above the custom Auction House frame.
-- Hidden sellers can be restored individually or all at once.
+- Score eligible bag items with configurable stat weights.
+- Calculate buyouts from a target Gold value or fixed price.
+- Pin manual price overrides, ignore unwanted items, and post all ready listings.
 
-### Typography
+### Managed bulk buying
 
-- The font picker is now a themed dropdown.
-- Each option previews its own font face.
-- Mouse-wheel and draggable scrollbar navigation are supported.
-- Font size is adjustable from 80% to 130%.
+- Queue selected listings at a configurable request interval.
+- Review total cost and score gain before confirming a mass purchase.
+- Follow sent, purchased, total, and available-gold progress.
 
-### Scoring accuracy
+### Custom interface
 
-- Random-affix bag items use their real item links when scored.
-- Suffix stats now resolve reliably for items such as “of the Tiger.”
-- Existing mythic scaling and Post weights remain intact.
+- Choose from multiple themes and switch between Easy UI and Peloria's default UI.
+- Move, resize, and reset the Auction House window.
+- Select a shared-media font from a themed preview dropdown.
+- Adjust interface text from 80% to 130%.
+- Use responsive Deals, Post, Auctions, Stats, and Settings layouts.
 
-### Bulk buying
+## Fixes included in 2.0.0
 
-- Listings are sent at a configurable interval, defaulting to 0.05 seconds.
-- Server results continue arriving while the queue advances.
-- Mass-buy confirmation can be enabled or disabled.
-- Progress reports sent, bought, total, and available gold.
+These correct behavior found during the Beta 2 and Beta 3 cycle; they are not separate addon features.
 
-### Interface polish
-
-- The custom window is movable, resizable, and resettable.
-- Layouts adapt to the available window dimensions.
-- The Easy UI / Default UI toggle aligns with the header controls.
-- Typography applies consistently to dialogs and overlays.
+- Random-affix bag items are scored from their real item links so suffix stats resolve correctly.
+- Mythic stat scaling uses bounded, coherent item data.
+- Seller-hide confirmation responds across the deal row and Buy cell and appears above the custom frame.
+- The font dropdown displays its options above the menu background.
+- Font preview paths and rows are cached to prevent lag while scrolling.
+- The font list includes a draggable scrollbar and follows the expected wheel direction.
+- Bulk buying advances independently of delayed server results while retaining accurate progress.
+- Dialogs and overlays consistently inherit the selected typography.
+- Responsive row counts prevent hidden-seller lists from overflowing smaller windows.
 
 ## Main features
 
