@@ -216,6 +216,7 @@ local charRef
 local FONT_BASE = setmetatable({}, { __mode = "k" })
 local FONT_PREVIEW = setmetatable({}, { __mode = "k" })
 local FONT_ROOTS = setmetatable({}, { __mode = "k" })
+local FONT_PATHS = {}
 local DEFAULT_FONT = "Default"
 local MIN_W, MIN_H = 760, 520
 local defaultWindow
@@ -401,8 +402,11 @@ end
 
 local function FontPath(name)
     if not name or name == DEFAULT_FONT then return nil end
+    if FONT_PATHS[name] ~= nil then return FONT_PATHS[name] or nil end
     local media = SharedMedia()
-    return media and media.Fetch and media:Fetch("font", name, true) or nil
+    local path = media and media.Fetch and media:Fetch("font", name, true) or nil
+    FONT_PATHS[name] = path or false
+    return path
 end
 
 local function ApplyFontObject(obj, path, scale)
@@ -420,8 +424,10 @@ local function ApplyFontObject(obj, path, scale)
 end
 
 function S.SetFontPreview(obj, name)
-    FONT_PREVIEW[obj] = FontPath(name) or false
-    ApplyFontObject(obj, FontPath(S.FontName()), S.FontScale())
+    local path = FontPath(name) or false
+    if FONT_PREVIEW[obj] == path then return end
+    FONT_PREVIEW[obj] = path
+    ApplyFontObject(obj, nil, S.FontScale())
 end
 
 local function ApplyFontTree(frame, path, scale, seen)
@@ -715,7 +721,9 @@ function S.Dropdown(parent, w, h, value, options, onSelect)
 
     menu:SetScript("OnMouseWheel", function(_, delta)
         local values = type(options) == "function" and options() or options or {}
-        menuOffset = math.max(0, math.min(menuOffset - delta, math.max(0, #values - rowMax)))
+        local nextOffset = math.max(0, math.min(menuOffset - delta, math.max(0, #values - rowMax)))
+        if nextOffset == menuOffset then return end
+        menuOffset = nextOffset
         b:Refresh()
     end)
     b:SetScript("OnClick", function()
