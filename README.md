@@ -33,6 +33,20 @@ A responsive replacement interface for Peloria's Auction House with weighted dea
 - Adjust interface text from 80% to 130%.
 - Use responsive Deals, Post, Auctions, Stats, and Settings layouts.
 
+## Fixes included in 2.0.0
+
+These correct behavior found during the Beta 2 and Beta 3 cycle; they are not separate addon features.
+
+- Random-affix bag items are scored from their real item links so suffix stats resolve correctly.
+- Mythic stat scaling uses bounded, coherent item data.
+- Seller-hide confirmation responds across the deal row and Buy cell and appears above the custom frame.
+- The font dropdown displays its options above the menu background.
+- Font preview paths and rows are cached to prevent lag while scrolling.
+- The font list includes a draggable scrollbar and follows the expected wheel direction.
+- Bulk buying advances independently of delayed server results while retaining accurate progress.
+- Dialogs and overlays consistently inherit the selected typography.
+- Responsive row counts prevent hidden-seller lists from overflowing smaller windows.
+
 ## Main features
 
 ### Deals
