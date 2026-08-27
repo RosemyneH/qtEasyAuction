@@ -77,7 +77,9 @@ local function Paint()
     end
     if T.font then
         local Skin = _G.qtEasyAuctionSkin
-        UIDropDownMenu_SetText(T.font, Skin and Skin.FontName and Skin.FontName() or "Default")
+        local fontName = Skin and Skin.FontName and Skin.FontName() or "Default"
+        if T.font.SetValue then T.font:SetValue(fontName)
+        else UIDropDownMenu_SetText(T.font, fontName) end
     end
     if T.fontSize then
         local Skin = _G.qtEasyAuctionSkin
@@ -295,29 +297,44 @@ local function CreatePanel()
     fontLabel:SetText("Font")
     T.fontLabel = fontLabel
 
-    local font = CreateFrame("Frame", "qtEasyAuctionFontDropdown", panel, "UIDropDownMenuTemplate")
-    font:SetPoint("LEFT", fontLabel, "RIGHT", 0, -2)
-    UIDropDownMenu_SetWidth(font, 180)
-    UIDropDownMenu_JustifyText(font, "LEFT")
-    UIDropDownMenu_Initialize(font, function(_, level)
-        if level ~= 1 or not Skin or not Skin.FontNames or not Skin.SetFont then return end
-        local names = Skin.FontNames()
-        local current = Skin.FontName()
-        for i = 1, #names do
-            local fontName = names[i]
-            local info = UIDropDownMenu_CreateInfo()
-            info.text = fontName
-            info.checked = fontName == current
-            info.func = function()
+    local font
+    if Skin and Skin.Dropdown then
+        font = Skin.Dropdown(
+            panel,
+            210,
+            28,
+            Skin.FontName(),
+            function() return Skin.FontNames() end,
+            function(fontName)
                 Skin.SetFont(fontName)
-                UIDropDownMenu_SetText(font, fontName)
-                CloseDropDownMenus()
                 Paint()
+            end)
+        font:SetPoint("LEFT", fontLabel, "RIGHT", 12, 0)
+    else
+        font = CreateFrame("Frame", "qtEasyAuctionFontDropdown", panel, "UIDropDownMenuTemplate")
+        font:SetPoint("LEFT", fontLabel, "RIGHT", 0, -2)
+        UIDropDownMenu_SetWidth(font, 180)
+        UIDropDownMenu_JustifyText(font, "LEFT")
+        UIDropDownMenu_Initialize(font, function(_, level)
+            if level ~= 1 or not Skin or not Skin.FontNames or not Skin.SetFont then return end
+            local names = Skin.FontNames()
+            local current = Skin.FontName()
+            for i = 1, #names do
+                local fontName = names[i]
+                local info = UIDropDownMenu_CreateInfo()
+                info.text = fontName
+                info.checked = fontName == current
+                info.func = function()
+                    Skin.SetFont(fontName)
+                    UIDropDownMenu_SetText(font, fontName)
+                    CloseDropDownMenus()
+                    Paint()
+                end
+                UIDropDownMenu_AddButton(info, level)
             end
-            UIDropDownMenu_AddButton(info, level)
-        end
-    end)
-    UIDropDownMenu_SetText(font, Skin and Skin.FontName and Skin.FontName() or "Default")
+        end)
+        UIDropDownMenu_SetText(font, Skin and Skin.FontName and Skin.FontName() or "Default")
+    end
     T.font = font
 
     local sizeLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")

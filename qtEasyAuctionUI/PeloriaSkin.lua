@@ -636,6 +636,110 @@ function S.Chip(parent, w, h, label, tick)
     return b
 end
 
+function S.Dropdown(parent, w, h, value, options, onSelect)
+    local b = S.CuteButton(parent, w, h, value)
+    b.label:ClearAllPoints()
+    b.label:SetPoint("LEFT", 10, 0)
+    b.label:SetPoint("RIGHT", -28, 0)
+    b.label:SetJustifyH("LEFT")
+
+    local arrow = b:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    arrow:SetPoint("RIGHT", -10, 1)
+    arrow:SetText("▼")
+    b.arrow = arrow
+
+    local menu = CreateFrame("Frame", nil, UIParent)
+    menu:SetWidth(w)
+    menu.bg = Fill(menu, "BACKGROUND", C.panel)
+    Stroke(menu)
+    menu:SetFrameStrata("TOOLTIP")
+    menu:SetFrameLevel(220)
+    menu:EnableMouse(true)
+    menu:EnableMouseWheel(true)
+    menu:Hide()
+    S.RegisterFontRoot(menu)
+    b.menu = menu
+
+    local rowHeight, rowMax, menuOffset = h, 10, 0
+    menu.rows = {}
+    for i = 1, rowMax do
+        local row = S.CuteButton(menu, w - 4, rowHeight - 2, "")
+        row:SetPoint("TOPLEFT", 2, -2 - (i - 1) * rowHeight)
+        row.label:ClearAllPoints()
+        row.label:SetJustifyH("LEFT")
+        row.label:SetPoint("LEFT", 8, 0)
+        row.label:SetPoint("RIGHT", -8, 0)
+        row:SetScript("OnClick", function(self)
+            b:SetValue(self.value)
+            menu:Hide()
+            if onSelect then onSelect(self.value) end
+        end)
+        menu.rows[i] = row
+    end
+
+    function b:SetValue(nextValue)
+        self.value = nextValue
+        self.label:SetText(nextValue or "")
+    end
+
+    function b:Refresh()
+        local values = type(options) == "function" and options() or options or {}
+        local visible = math.min(rowMax, #values)
+        menuOffset = math.max(0, math.min(menuOffset, math.max(0, #values - visible)))
+        menu:SetHeight(math.max(4, visible * rowHeight + 4))
+        for i = 1, rowMax do
+            local row = menu.rows[i]
+            local option = values[menuOffset + i]
+            if option then
+                row.value = option
+                row.label:SetText(option)
+                row:SetLocked(option == self.value)
+                row:Show()
+            else
+                row.value = nil
+                row:Hide()
+            end
+        end
+    end
+
+    menu:SetScript("OnMouseWheel", function(_, delta)
+        local values = type(options) == "function" and options() or options or {}
+        menuOffset = math.max(0, math.min(menuOffset - delta, math.max(0, #values - rowMax)))
+        b:Refresh()
+    end)
+    b:SetScript("OnClick", function()
+        if menu:IsShown() then
+            menu:Hide()
+            return
+        end
+        local values = type(options) == "function" and options() or options or {}
+        menuOffset = 0
+        for i = 1, #values do
+            if values[i] == b.value then
+                menuOffset = math.max(0, math.min(i - 1, #values - rowMax))
+                break
+            end
+        end
+        menu:ClearAllPoints()
+        menu:SetPoint("TOPLEFT", b, "BOTTOMLEFT", 0, -2)
+        b:Refresh()
+        menu:Show()
+        menu:Raise()
+    end)
+    parent:HookScript("OnHide", function() menu:Hide() end)
+
+    local PaintButton = b.PaintTheme
+    function b:PaintTheme()
+        PaintButton(self)
+        Ink(self.arrow, C.cream)
+        Tint(menu.bg, C.panel)
+        PaintStroke(menu, C.accent)
+    end
+    b:SetValue(value)
+    b:PaintTheme()
+    return b
+end
+
 local function ShowTab(i, quiet)
     S.tab = i
     if S.pages then
