@@ -173,8 +173,14 @@ local function AccountDB()
     qtEasyAuctionDB.bulkBuyDelay = tonumber(qtEasyAuctionDB.bulkBuyDelay) or 0.05
     if qtEasyAuctionDB.confirmMassBuy == nil then qtEasyAuctionDB.confirmMassBuy = true end
     if qtEasyAuctionDB.hideDuplicateDeals == nil then qtEasyAuctionDB.hideDuplicateDeals = true end
-    if qtEasyAuctionDB.hideLowValueDeals == nil then qtEasyAuctionDB.hideLowValueDeals = true end
-    qtEasyAuctionDB.minimumDealGold = math.max(0, tonumber(qtEasyAuctionDB.minimumDealGold) or 30)
+    if qtEasyAuctionDB.hideLowGoldValueDeals == nil then
+        qtEasyAuctionDB.hideLowGoldValueDeals = qtEasyAuctionDB.hideLowValueDeals
+        if qtEasyAuctionDB.hideLowGoldValueDeals == nil then qtEasyAuctionDB.hideLowGoldValueDeals = true end
+    end
+    qtEasyAuctionDB.minimumGoldValue = math.max(
+        0, tonumber(qtEasyAuctionDB.minimumGoldValue or qtEasyAuctionDB.minimumDealGold) or 30)
+    qtEasyAuctionDB.hideLowValueDeals = nil
+    qtEasyAuctionDB.minimumDealGold = nil
     return qtEasyAuctionDB
 end
 
@@ -1251,7 +1257,7 @@ end
 local function DealMatches(deal, q)
     if IsSellerHidden(deal.owner) then return false end
     local db = AccountDB()
-    if db.hideLowValueDeals and (tonumber(deal.gold) or GoldRaw(deal.minPrice)) < db.minimumDealGold then
+    if db.hideLowGoldValueDeals and (tonumber(deal.perGold) or 0) < db.minimumGoldValue then
         return false
     end
     if not q or q == "" then return true end

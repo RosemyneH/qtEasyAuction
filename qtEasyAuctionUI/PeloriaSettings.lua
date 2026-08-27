@@ -18,8 +18,14 @@ local function DB()
     qtEasyAuctionDB.bulkBuyDelay = tonumber(qtEasyAuctionDB.bulkBuyDelay) or 0.05
     if qtEasyAuctionDB.confirmMassBuy == nil then qtEasyAuctionDB.confirmMassBuy = true end
     if qtEasyAuctionDB.hideDuplicateDeals == nil then qtEasyAuctionDB.hideDuplicateDeals = true end
-    if qtEasyAuctionDB.hideLowValueDeals == nil then qtEasyAuctionDB.hideLowValueDeals = true end
-    qtEasyAuctionDB.minimumDealGold = math.max(0, tonumber(qtEasyAuctionDB.minimumDealGold) or 30)
+    if qtEasyAuctionDB.hideLowGoldValueDeals == nil then
+        qtEasyAuctionDB.hideLowGoldValueDeals = qtEasyAuctionDB.hideLowValueDeals
+        if qtEasyAuctionDB.hideLowGoldValueDeals == nil then qtEasyAuctionDB.hideLowGoldValueDeals = true end
+    end
+    qtEasyAuctionDB.minimumGoldValue = math.max(
+        0, tonumber(qtEasyAuctionDB.minimumGoldValue or qtEasyAuctionDB.minimumDealGold) or 30)
+    qtEasyAuctionDB.hideLowValueDeals = nil
+    qtEasyAuctionDB.minimumDealGold = nil
     return qtEasyAuctionDB
 end
 
@@ -63,11 +69,11 @@ local function Paint()
         else T.duplicates:SetChecked(DB().hideDuplicateDeals) end
     end
     if T.lowValue then
-        if T.lowValue.SetOn then T.lowValue:SetOn(DB().hideLowValueDeals)
-        else T.lowValue:SetChecked(DB().hideLowValueDeals) end
+        if T.lowValue.SetOn then T.lowValue:SetOn(DB().hideLowGoldValueDeals)
+        else T.lowValue:SetChecked(DB().hideLowGoldValueDeals) end
     end
-    if T.minimumDealGold and not T.minimumDealGold:HasFocus() then
-        T.minimumDealGold:SetText(tostring(DB().minimumDealGold))
+    if T.minimumGoldValue and not T.minimumGoldValue:HasFocus() then
+        T.minimumGoldValue:SetText(tostring(DB().minimumGoldValue))
     end
     if T.font then
         local Skin = _G.qtEasyAuctionSkin
@@ -224,23 +230,23 @@ local function CreatePanel()
 
     local lowValue
     if Skin and Skin.Chip then
-        lowValue = Skin.Chip(panel, 148, 28, "Hide deals under", true)
+        lowValue = Skin.Chip(panel, 164, 28, "Hide Gold value under", true)
         lowValue:SetPoint("LEFT", dealsTitle, "RIGHT", 18, 0)
         lowValue.OnToggle = function(self, on)
-            DB().hideLowValueDeals = on and true or false
-            self:SetOn(DB().hideLowValueDeals)
+            DB().hideLowGoldValueDeals = on and true or false
+            self:SetOn(DB().hideLowGoldValueDeals)
             RefreshDeals()
         end
-        lowValue:SetOn(DB().hideLowValueDeals)
+        lowValue:SetOn(DB().hideLowGoldValueDeals)
     else
         lowValue = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
         lowValue:SetPoint("LEFT", dealsTitle, "RIGHT", 18, 0)
         local label = lowValue:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         label:SetPoint("LEFT", lowValue, "RIGHT", 2, 0)
-        label:SetText("Hide deals under")
-        lowValue:SetChecked(DB().hideLowValueDeals)
+        label:SetText("Hide Gold value under")
+        lowValue:SetChecked(DB().hideLowGoldValueDeals)
         lowValue:SetScript("OnClick", function(self)
-            DB().hideLowValueDeals = self:GetChecked() and true or false
+            DB().hideLowGoldValueDeals = self:GetChecked() and true or false
             RefreshDeals()
         end)
         lowValue.label = label
@@ -248,36 +254,36 @@ local function CreatePanel()
     T.lowValue = lowValue
 
     local minimumWrap
-    local minimumDealGold
+    local minimumGoldValue
     if Skin and Skin.Field then
-        minimumWrap = Skin.Field(panel, 72, 28, "qtEasyAuctionMinimumDealGold")
+        minimumWrap = Skin.Field(panel, 72, 28, "qtEasyAuctionMinimumGoldValue")
         minimumWrap:SetPoint("LEFT", lowValue, "RIGHT", 8, 0)
-        minimumDealGold = minimumWrap.box
+        minimumGoldValue = minimumWrap.box
     else
-        minimumDealGold = CreateFrame("EditBox", "qtEasyAuctionMinimumDealGold", panel, "InputBoxTemplate")
-        minimumDealGold:SetWidth(64)
-        minimumDealGold:SetHeight(24)
-        minimumDealGold:SetPoint("LEFT", lowValue, "RIGHT", 8, 0)
-        minimumDealGold:SetAutoFocus(false)
+        minimumGoldValue = CreateFrame("EditBox", "qtEasyAuctionMinimumGoldValue", panel, "InputBoxTemplate")
+        minimumGoldValue:SetWidth(64)
+        minimumGoldValue:SetHeight(24)
+        minimumGoldValue:SetPoint("LEFT", lowValue, "RIGHT", 8, 0)
+        minimumGoldValue:SetAutoFocus(false)
     end
-    minimumDealGold:SetMaxLetters(9)
-    minimumDealGold:SetText(tostring(DB().minimumDealGold))
-    local function SaveMinimumDealGold(self)
+    minimumGoldValue:SetMaxLetters(9)
+    minimumGoldValue:SetText(tostring(DB().minimumGoldValue))
+    local function SaveMinimumGoldValue(self)
         local value = tonumber(self:GetText())
-        if value then DB().minimumDealGold = math.max(0, math.min(100000000, value)) end
-        self:SetText(tostring(DB().minimumDealGold))
+        if value then DB().minimumGoldValue = math.max(0, math.min(100000000, value)) end
+        self:SetText(tostring(DB().minimumGoldValue))
         RefreshDeals()
     end
-    minimumDealGold:SetScript("OnEnterPressed", function(self) SaveMinimumDealGold(self); self:ClearFocus() end)
-    minimumDealGold:SetScript("OnEditFocusLost", SaveMinimumDealGold)
-    minimumDealGold:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    T.minimumDealGold = minimumDealGold
+    minimumGoldValue:SetScript("OnEnterPressed", function(self) SaveMinimumGoldValue(self); self:ClearFocus() end)
+    minimumGoldValue:SetScript("OnEditFocusLost", SaveMinimumGoldValue)
+    minimumGoldValue:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    T.minimumGoldValue = minimumGoldValue
     T.minimumWrap = minimumWrap
 
-    local minimumGoldLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontDisable")
-    minimumGoldLabel:SetPoint("LEFT", minimumWrap or minimumDealGold, "RIGHT", 8, 0)
-    minimumGoldLabel:SetText("gold")
-    T.minimumGoldLabel = minimumGoldLabel
+    local minimumValueLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+    minimumValueLabel:SetPoint("LEFT", minimumWrap or minimumGoldValue, "RIGHT", 8, 0)
+    minimumValueLabel:SetText("score / gold")
+    T.minimumValueLabel = minimumValueLabel
 
     local appearanceTitle = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     appearanceTitle:SetPoint("TOPLEFT", 18, -154)
@@ -424,7 +430,7 @@ function T.ApplySkin()
     for i = 1, #labels do
         if labels[i] then labels[i]:SetTextColor(pal.cream[1], pal.cream[2], pal.cream[3]) end
     end
-    local muted = { T.detail, T.seconds, T.minimumGoldLabel, T.hiddenCount, T.hint }
+    local muted = { T.detail, T.seconds, T.minimumValueLabel, T.hiddenCount, T.hint }
     for i = 1, #muted do
         if muted[i] then muted[i]:SetTextColor(pal.mute[1], pal.mute[2], pal.mute[3]) end
     end
