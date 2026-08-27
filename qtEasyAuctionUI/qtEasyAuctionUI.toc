@@ -5,6 +5,7 @@
 ## Version: 2.0.0-beta.3
 ## LoadOnDemand: 1
 ## Dependencies: qtEasyAuction
+## OptionalDeps: LibSharedMedia-3.0
 ## X-Child-Of: qtEasyAuction
 
 PeloriaAutoAuction.lua

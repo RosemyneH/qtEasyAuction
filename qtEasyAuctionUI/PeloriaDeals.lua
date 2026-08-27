@@ -85,16 +85,16 @@ local STAT_COLOR = {
 
 -- ʕ •ᴥ•ʔ✿ sell = shop listings, post = bag buyouts ✿ ʕ •ᴥ•ʔ
 local SHOP_WEIGHTS = {
-    str = 1.01, agi = 1.00, sta = 0.26, int = 0.49, spi = 0.55,
+    str = 1.01, agi = 1.00, sta = 0.56, int = 0.49, spi = 0.25,
     ap  = 1.00, sp  = 1.00,
-    arm = 0.01, crit = 0.01, hit = 0.01, haste = 0.01,
-    exp = 0.00, mp5 = 0.00, raw = 0.01,
+    arm = 0.01, crit = 0.00, hit = 0.00, haste = 0.00,
+    exp = 0.00, mp5 = 0.00, raw = 0.00,
 }
 local POST_WEIGHTS = {
-    str = 1.00, agi = 1.00, int = 1.00,
+    str = 1.00, agi = 1.00, int = 0.56,
     ap  = 1.00, sp  = 1.00,
-    spi = 0.50, sta = 0.40, arm = 0.05,
-    crit = 1.00, hit = 1.00, haste = 1.00, exp = 1.00, mp5 = 1.00, raw = 1.00,
+    spi = 0.50, sta = 0.80, arm = 0.01,
+    crit = 0, hit = 0, haste = 0, exp = 0, mp5 = 0, raw = 0,
 }
 
 local BACKDROP = {
@@ -163,9 +163,18 @@ local FinishMassBuy
 local function AccountDB()
     qtEasyAuctionDB = qtEasyAuctionDB or {}
     qtEasyAuctionDB.hiddenSellers = qtEasyAuctionDB.hiddenSellers or {}
-    qtEasyAuctionDB.bulkBuyDelay = tonumber(qtEasyAuctionDB.bulkBuyDelay) or 0.10
+    if qtEasyAuctionDB.bulkBuyVersion ~= 1 then
+        if qtEasyAuctionDB.bulkBuyDelay == nil or qtEasyAuctionDB.bulkBuyDelay == 0.10 then
+            qtEasyAuctionDB.bulkBuyDelay = 0.05
+        end
+        qtEasyAuctionDB.bulkBuyStep = nil
+        qtEasyAuctionDB.bulkBuyVersion = 1
+    end
+    qtEasyAuctionDB.bulkBuyDelay = tonumber(qtEasyAuctionDB.bulkBuyDelay) or 0.05
     if qtEasyAuctionDB.confirmMassBuy == nil then qtEasyAuctionDB.confirmMassBuy = true end
     if qtEasyAuctionDB.hideDuplicateDeals == nil then qtEasyAuctionDB.hideDuplicateDeals = true end
+    if qtEasyAuctionDB.hideLowValueDeals == nil then qtEasyAuctionDB.hideLowValueDeals = true end
+    qtEasyAuctionDB.minimumDealGold = math.max(0, tonumber(qtEasyAuctionDB.minimumDealGold) or 30)
     return qtEasyAuctionDB
 end
 
@@ -1241,6 +1250,10 @@ end
 
 local function DealMatches(deal, q)
     if IsSellerHidden(deal.owner) then return false end
+    local db = AccountDB()
+    if db.hideLowValueDeals and (tonumber(deal.gold) or GoldRaw(deal.minPrice)) < db.minimumDealGold then
+        return false
+    end
     if not q or q == "" then return true end
     local name = string.lower(deal.name or "")
     local seller = string.lower(deal.owner or "")
@@ -1480,12 +1493,12 @@ local function OnBought(code, detail)
     if S.massLeft and S.massLeft > 0 then
         S.massLeft = S.massLeft - 1
         if code == "OK" then S.massOk = (S.massOk or 0) + 1 end
-        S.massWaiting = nil
         if S.massLeft <= 0 then
             FinishMassBuy()
         else
-            S.massNextAt = GetTime() + math.max(0, tonumber(AccountDB().bulkBuyDelay) or 0.10)
-            SetStatus(string.format("Buying… %d of %d bought.", S.massOk or 0, S.massTotal or 0))
+            SetStatus(string.format(
+                "Buying… %d/%d sent · %d bought.",
+                S.massSent or 0, S.massTotal or 0, S.massOk or 0))
         end
         return
     end
@@ -1520,38 +1533,48 @@ end
 
 FinishMassBuy = function()
     local bought, total = S.massOk or 0, S.massTotal or 0
-    S.massQueue, S.massWaiting, S.massNextAt = nil, nil, nil
-    S.massLeft, S.massTotal, S.massOk = nil, nil, nil
+    S.massQueue, S.massNextAt = nil, nil
+    S.massLeft, S.massTotal, S.massOk, S.massSent = nil, nil, nil, nil
     if S.massPump then S.massPump:Hide() end
-    SetStatus(string.format("Mass buy done — %d of %d bought. Mail is on the way.", bought, total))
+    if S.massStopped then
+        SetStatus(string.format("Bulk buying stopped — %d of %d bought.", bought, total))
+    else
+        SetStatus(string.format("Mass buy done — %d of %d bought. Mail is on the way.", bought, total))
+    end
+    S.massStopped = nil
 end
 
 local function PumpMassBuy()
-    if not S.massQueue or S.massWaiting then return end
-    if S.massNextAt and GetTime() < S.massNextAt then return end
-    local deal = table.remove(S.massQueue, 1)
-    if not deal then
-        FinishMassBuy()
+    if not S.massQueue or #S.massQueue == 0 then
+        if S.massPump then S.massPump:Hide() end
         return
     end
+    if S.massNextAt and GetTime() < S.massNextAt then return end
+    local deal = table.remove(S.massQueue, 1)
+    if not deal then return end
     QueueBuy(deal)
-    S.massWaiting = true
-    SetStatus(string.format("Buying… %d of %d bought.", S.massOk or 0, S.massTotal or 0))
     local ok = pcall(PeloriaSend, string.format("%s^BUY^%s^%s", C.PREFIX, deal.idRaw, deal.buyoutRaw))
     if not ok then
         table.remove(S.pendingBuys, #S.pendingBuys)
-        S.massQueue, S.massWaiting, S.massNextAt = nil, nil, nil
-        S.massLeft, S.massTotal, S.massOk = nil, nil, nil
-        SetStatus("Bulk buying stopped — PeloriaSend failed.")
+        S.massLeft = math.max(0, (S.massLeft or 0) - #S.massQueue - 1)
+        S.massQueue = {}
+        S.massStopped = true
+        if S.massLeft <= 0 then FinishMassBuy() end
         return
     end
+    S.massSent = (S.massSent or 0) + 1
+    S.massNextAt = GetTime() + math.max(0, tonumber(AccountDB().bulkBuyDelay) or 0.05)
+    SetStatus(string.format(
+        "Buying… %d/%d sent · %d bought.",
+        S.massSent or 0, S.massTotal or 0, S.massOk or 0))
+    if #S.massQueue == 0 and S.massPump then S.massPump:Hide() end
 end
 
 local function StartMassPump()
     if not S.massPump then
         S.massPump = CreateFrame("Frame", nil, UIParent)
         S.massPump:SetScript("OnUpdate", function()
-            if S.massQueue and not S.massWaiting then
+            if S.massQueue then
                 PumpMassBuy()
             elseif not S.massQueue then
                 S.massPump:Hide()
@@ -1745,12 +1768,13 @@ local function BuyPicked(list)
         SetStatus("Nothing in that sweep can be bought yet.")
         return
     end
-    if S.massQueue or S.massWaiting or #S.pendingBuys > 0 then
+    if S.massQueue or S.massLeft or #S.pendingBuys > 0 then
         SetStatus("A bulk purchase is already running.")
         return
     end
     S.massQueue = queue
-    S.massTotal, S.massOk, S.massLeft = #queue, 0, #queue
+    S.massTotal, S.massOk, S.massLeft, S.massSent = #queue, 0, #queue, 0
+    S.massStopped = nil
     S.massNextAt = 0
     StartMassPump()
 end
@@ -1828,6 +1852,8 @@ local function EnsureMassConfirm()
     f:SetToplevel(true)
     f:EnableMouse(true)
     f:SetMovable(true)
+    local Skin = _G.qtEasyAuctionSkin
+    if Skin and Skin.RegisterFontRoot then Skin.RegisterFontRoot(f) end
     f:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -2677,6 +2703,10 @@ function ScanLabel()
 end
 
 local function StartScan(query)
+    if S.massQueue or S.massLeft then
+        SetStatus("Wait for the bulk purchase to finish.")
+        return
+    end
     if type(PeloriaSend) ~= "function" then
         SetStatus("PeloriaSend missing — open the AH at an auctioneer.")
         return
@@ -2819,6 +2849,7 @@ local function ShowWeights(kind)
 
     local Skin = _G.qtEasyAuctionSkin
     local f = CreateFrame("Frame", "qtEasyAuctionWeights", UIParent)
+    if Skin and Skin.RegisterFontRoot then Skin.RegisterFontRoot(f) end
     f:SetWidth(328)
     f:SetHeight(88 + #STAT_KEYS * 34 + 44)
     f:SetPoint("CENTER", 0, 24)
@@ -3086,7 +3117,7 @@ D.ShowWeights = ShowWeights
 local function BuyDeal(deal)
     if not deal then return end
     if type(PeloriaSend) ~= "function" then return end
-    if S.massQueue or S.massWaiting then
+    if S.massQueue or S.massLeft then
         SetStatus("Wait for the bulk purchase to finish.")
         return
     end
@@ -3588,7 +3619,7 @@ local function CreatePanel()
         ClearSweep()
     end)
     panel:SetScript("OnUpdate", function(_, delta)
-        if S.massQueue and not S.massWaiting then PumpMassBuy() end
+        if S.massQueue then PumpMassBuy() end
         if S.state == "idle" and S.rescoreAt and GetTime() >= S.rescoreAt then
             S.rescoreAt = nil
             if S.summaries and #S.summaries > 0 then
@@ -3644,7 +3675,8 @@ local function CreatePanel()
 end
 
 function D.ApplySkin()
-    local pal = _G.qtEasyAuctionSkin and _G.qtEasyAuctionSkin.C and _G.qtEasyAuctionSkin.C()
+    local Skin = _G.qtEasyAuctionSkin
+    local pal = Skin and Skin.C and Skin.C()
     if not pal then return end
     if D.headBg then D.headBg:SetVertexColor(pal.head[1], pal.head[2], pal.head[3], pal.head[4] or 1) end
     if D.headLine then D.headLine:SetVertexColor(pal.accent[1], pal.accent[2], pal.accent[3], 0.9) end
@@ -3659,6 +3691,15 @@ function D.ApplySkin()
     if D.RefreshHeads then D.RefreshHeads() end
     PaintWeightFrame()
     PaintMassConfirm()
+    Paint()
+    if Skin.ApplyTypography then
+        if D.panel then Skin.ApplyTypography(D.panel) end
+        if D.massFrame then Skin.ApplyTypography(D.massFrame) end
+        if D.weightFrame then Skin.ApplyTypography(D.weightFrame) end
+    end
+end
+
+function D.RefreshLayout()
     Paint()
 end
 

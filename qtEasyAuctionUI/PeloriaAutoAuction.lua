@@ -782,6 +782,8 @@ local function EnsurePreview()
     local root = CreateFrame("Frame", "PeloriaAutoAuctionPreview", UIParent)
     root:SetFrameStrata("TOOLTIP")
     root:Hide()
+    local Skin = _G.qtEasyAuctionSkin
+    if Skin and Skin.RegisterFontRoot then Skin.RegisterFontRoot(root) end
     PAA.preview = root
     PAA.columns = {}
     return root
@@ -922,6 +924,8 @@ RefreshPreview = function()
         end
         col:Show()
     end
+    local Skin = _G.qtEasyAuctionSkin
+    if Skin and Skin.ApplyTypography then Skin.ApplyTypography(PAA.preview) end
     PAA.preview:Show()
 end
 
@@ -1033,6 +1037,10 @@ local function ApplyPostSkin()
     if PAA.SyncMode then PAA.SyncMode() end
     if RefreshPostHeads then RefreshPostHeads() end
     if RefreshPostList then RefreshPostList() end
+    if Skin.ApplyTypography then
+        if PAA.dock then Skin.ApplyTypography(PAA.dock) end
+        if PAA.preview then Skin.ApplyTypography(PAA.preview) end
+    end
 end
 
 local function CreateButton()
@@ -1655,5 +1663,9 @@ _G.qtEasyAuctionPost = {
     end,
     ApplySkin = function()
         ApplyPostSkin()
+    end,
+    RefreshLayout = function()
+        if RefreshPostHeads then RefreshPostHeads() end
+        if RefreshPostList then RefreshPostList() end
     end,
 }

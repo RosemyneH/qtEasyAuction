@@ -213,6 +213,11 @@ S.buttons = {}
 S.themeId = "crypt"
 
 local charRef
+local FONT_BASE = setmetatable({}, { __mode = "k" })
+local FONT_ROOTS = setmetatable({}, { __mode = "k" })
+local DEFAULT_FONT = "Default"
+local MIN_W, MIN_H = 760, 520
+local defaultWindow
 
 -- ʕ •ᴥ•ʔ✿ per-character prefs; copy from account DB once ✿ ʕ •ᴥ•ʔ
 function S.Char()
@@ -234,6 +239,10 @@ function S.Char()
     if C.ratioPrice then C.scorePrice = false end
     if C.postBindable == nil then C.postBindable = false end
     if C.searchAll == nil then C.searchAll = false end
+    if C.useCustomUI == nil then C.useCustomUI = true end
+    if type(C.fontScale) ~= "number" then C.fontScale = 1 end
+    C.fontScale = math.max(0.8, math.min(1.3, C.fontScale))
+    if type(C.window) ~= "table" then C.window = {} end
     if C.priceMax == nil then C.priceMax = A.priceMax or 3000000 end
     if C.scoreCap == nil then C.scoreCap = A.scoreCap or 1000000 end
     if not C.weights then
@@ -352,6 +361,110 @@ end
 
 function S.C()
     return C
+end
+
+local function SharedMedia()
+    if type(LibStub) == "table" and LibStub.GetLibrary then
+        return LibStub:GetLibrary("LibSharedMedia-3.0", true)
+    end
+    if type(LibStub) == "function" then return LibStub("LibSharedMedia-3.0", true) end
+    return nil
+end
+
+function S.FontNames()
+    local out = { DEFAULT_FONT }
+    local seen = { [DEFAULT_FONT] = true }
+    local media = SharedMedia()
+    local names = media and media.List and media:List("font")
+    for i = 1, #(names or {}) do
+        if not seen[names[i]] then
+            seen[names[i]] = true
+            out[#out + 1] = names[i]
+        end
+    end
+    table.sort(out, function(a, b)
+        if a == DEFAULT_FONT then return true end
+        if b == DEFAULT_FONT then return false end
+        return string.lower(a) < string.lower(b)
+    end)
+    return out
+end
+
+function S.FontName()
+    return S.Char().fontName or DEFAULT_FONT
+end
+
+function S.FontScale()
+    return S.Char().fontScale or 1
+end
+
+local function FontPath(name)
+    if not name or name == DEFAULT_FONT then return nil end
+    local media = SharedMedia()
+    return media and media.Fetch and media:Fetch("font", name, true) or nil
+end
+
+local function ApplyFontObject(obj, path, scale)
+    if not obj or type(obj.GetFont) ~= "function" or type(obj.SetFont) ~= "function" then return end
+    local base = FONT_BASE[obj]
+    if not base then
+        local font, size, flags = obj:GetFont()
+        if not font or not size then return end
+        base = { font = font, size = size, flags = flags }
+        FONT_BASE[obj] = base
+    end
+    pcall(obj.SetFont, obj, path or base.font, math.max(6, base.size * scale), base.flags)
+end
+
+local function ApplyFontTree(frame, path, scale, seen)
+    if not frame or seen[frame] then return end
+    seen[frame] = true
+    if frame.GetObjectType and frame:GetObjectType() == "GameTooltip" then return end
+    if frame.GetObjectType then
+        local kind = frame:GetObjectType()
+        if kind == "EditBox" or kind == "FontString" then ApplyFontObject(frame, path, scale) end
+    end
+    if frame.GetFontString then ApplyFontObject(frame:GetFontString(), path, scale) end
+    if frame.GetRegions then
+        local regions = { frame:GetRegions() }
+        for i = 1, #regions do
+            local region = regions[i]
+            if region and region.GetObjectType and region:GetObjectType() == "FontString" then
+                ApplyFontObject(region, path, scale)
+            end
+        end
+    end
+    if frame.GetChildren then
+        local children = { frame:GetChildren() }
+        for i = 1, #children do ApplyFontTree(children[i], path, scale, seen) end
+    end
+end
+
+function S.ApplyTypography(root)
+    local path = FontPath(S.FontName())
+    local scale = S.FontScale()
+    if root then
+        ApplyFontTree(root, path, scale, {})
+        return
+    end
+    for frame in pairs(FONT_ROOTS) do ApplyFontTree(frame, path, scale, {}) end
+end
+
+function S.RegisterFontRoot(frame)
+    if not frame then return end
+    FONT_ROOTS[frame] = true
+    S.ApplyTypography(frame)
+end
+
+function S.SetFont(name)
+    if name ~= DEFAULT_FONT and not FontPath(name) then name = DEFAULT_FONT end
+    S.Char().fontName = name
+    S.ApplyTypography()
+end
+
+function S.SetFontScale(scale)
+    S.Char().fontScale = math.max(0.8, math.min(1.3, tonumber(scale) or 1))
+    S.ApplyTypography()
 end
 
 function S.ThemeById(id)
@@ -621,6 +734,7 @@ function S.Apply(id)
     if _G.qtEasyAuctionSettings and _G.qtEasyAuctionSettings.ApplySkin then
         _G.qtEasyAuctionSettings.ApplySkin()
     end
+    S.ApplyTypography()
 end
 
 local function MakeThemeChip(parent, theme, index)
@@ -661,6 +775,105 @@ local STRATA_NAME = {
     "DIALOG", "FULLSCREEN", "FULLSCREEN_DIALOG", "TOOLTIP",
 }
 
+local function SaveWindow(parent)
+    if not parent then return end
+    local cx, cy = parent:GetCenter()
+    local ux, uy = UIParent:GetCenter()
+    if not cx or not cy or not ux or not uy then return end
+    local window = S.Char().window
+    window.width = parent:GetWidth()
+    window.height = parent:GetHeight()
+    window.x = cx - ux
+    window.y = cy - uy
+end
+
+local function ConfigureWindow(parent)
+    if not defaultWindow then
+        local cx, cy = parent:GetCenter()
+        local ux, uy = UIParent:GetCenter()
+        defaultWindow = {
+            width = parent:GetWidth(),
+            height = parent:GetHeight(),
+            x = cx and ux and (cx - ux) or 0,
+            y = cy and uy and (cy - uy) or 0,
+            movable = parent.IsMovable and parent:IsMovable() or false,
+            resizable = parent.IsResizable and parent:IsResizable() or false,
+            clamped = parent.IsClampedToScreen and parent:IsClampedToScreen() or false,
+        }
+    end
+    if S.customMode then
+        parent:SetMovable(true)
+        parent:SetResizable(true)
+        parent:SetClampedToScreen(true)
+        if parent.SetMinResize then parent:SetMinResize(MIN_W, MIN_H) end
+        if parent.SetMaxResize then
+            parent:SetMaxResize(math.max(MIN_W, UIParent:GetWidth()), math.max(MIN_H, UIParent:GetHeight()))
+        end
+    else
+        if parent.SetMinResize then parent:SetMinResize(1, 1) end
+        if parent.SetMaxResize then parent:SetMaxResize(UIParent:GetWidth(), UIParent:GetHeight()) end
+        parent:SetMovable(defaultWindow.movable)
+        parent:SetResizable(defaultWindow.resizable)
+        parent:SetClampedToScreen(defaultWindow.clamped)
+    end
+    if S.geometryApplied and S.geometryParent == parent then return end
+    local window = S.customMode and S.Char().window or defaultWindow
+    if window.width and window.height then
+        local minW, minH = S.customMode and MIN_W or 1, S.customMode and MIN_H or 1
+        parent:SetWidth(math.max(minW, math.min(window.width, UIParent:GetWidth())))
+        parent:SetHeight(math.max(minH, math.min(window.height, UIParent:GetHeight())))
+    end
+    if window.x and window.y then
+        parent:ClearAllPoints()
+        parent:SetPoint("CENTER", UIParent, "CENTER", window.x, window.y)
+    end
+    S.geometryApplied = true
+    S.geometryParent = parent
+end
+
+function S.ResetWindow()
+    local parent = PeloriaAuctionHouseFrame
+    if not parent then return end
+    S.Char().window = {}
+    parent:ClearAllPoints()
+    parent:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    parent:SetWidth(math.max(MIN_W, math.min(defaultWindow and defaultWindow.width or 900, UIParent:GetWidth())))
+    parent:SetHeight(math.max(MIN_H, math.min(defaultWindow and defaultWindow.height or 650, UIParent:GetHeight())))
+    SaveWindow(parent)
+    S.geometryApplied = true
+    S.geometryParent = parent
+    if S.RefreshLayout then S.RefreshLayout() end
+end
+
+local function RefreshLayout()
+    if S.tabBar and S.tabs then
+        local width = S.tabBar:GetWidth() or 0
+        if width > 0 then
+            local gap, edge = 6, 6
+            local tabW = (width - edge * 2 - gap * (#S.tabs - 1)) / #S.tabs
+            for i = 1, #S.tabs do
+                local tab = S.tabs[i]
+                tab:ClearAllPoints()
+                tab:SetWidth(tabW)
+                tab:SetPoint("LEFT", edge + (i - 1) * (tabW + gap), 0)
+            end
+        end
+    end
+    local modules = {
+        _G.qtEasyAuctionDeals,
+        _G.qtEasyAuctionPost,
+        _G.qtEasyAuctionMine,
+        _G.qtEasyAuctionSales,
+        _G.qtEasyAuctionSettings,
+    }
+    for i = 1, #modules do
+        local module = modules[i]
+        if module and module.RefreshLayout then module.RefreshLayout() end
+    end
+end
+
+S.RefreshLayout = RefreshLayout
+
 -- ʕ •ᴥ•ʔ✿ sibling overlay; HIGH-child sits under DIALOG AH chrome ✿ ʕ •ᴥ•ʔ
 local function Cover(host, parent)
     local anchor = parent:GetParent() or UIParent
@@ -672,16 +885,53 @@ local function Cover(host, parent)
     if rank < 8 then rank = rank + 1 end
     host:SetFrameStrata(STRATA_NAME[rank])
     host:SetFrameLevel((parent:GetFrameLevel() or 1) + 20)
-    host:Show()
+    if S.customMode then host:Show() else host:Hide() end
     host:Raise()
+end
+
+local function ApplyDisplayMode(parent)
+    if not parent then return end
+    local custom = S.Char().useCustomUI ~= false
+    S.customMode = custom
+    if custom then
+        local alpha = parent:GetAlpha()
+        if alpha and alpha > 0 then S.nativeAlpha = alpha end
+        parent:SetAlpha(0)
+        if S.host then S.host:Show() end
+    else
+        parent:SetAlpha(S.nativeAlpha or 1)
+        if S.host then S.host:Hide() end
+        if S.tray then S.tray:Hide() end
+        local deals = _G.qtEasyAuctionDeals
+        if deals and deals.weightFrame then deals.weightFrame:Hide() end
+    end
+    if S.uiToggle then
+        S.uiToggle.label:SetText(custom and "Default UI" or "Easy UI")
+        S.uiToggle:Show()
+        S.uiToggle:Raise()
+    end
+end
+
+function S.SetCustomUI(on)
+    local parent = PeloriaAuctionHouseFrame
+    if S.customMode and parent then SaveWindow(parent) end
+    S.Char().useCustomUI = on and true or false
+    S.customMode = S.Char().useCustomUI
+    S.geometryApplied = nil
+    ConfigureWindow(parent)
+    ApplyDisplayMode(parent)
 end
 
 function S.Create()
     local parent = PeloriaAuctionHouseFrame
     if not parent then return end
     parent:SetScale(1)
+    S.customMode = S.Char().useCustomUI ~= false
+    ConfigureWindow(parent)
     if S.host then
         Cover(S.host, parent)
+        ApplyDisplayMode(parent)
+        RefreshLayout()
         return S.host
     end
     S.themeId = S.Char().theme or "crypt"
@@ -692,6 +942,7 @@ function S.Create()
     Cover(host, parent)
     host:EnableMouse(true)
     S.hostBg = Fill(host, "BACKGROUND", C.bg)
+    S.RegisterFontRoot(host)
 
     local banner = host:CreateTexture(nil, "ARTWORK")
     banner:SetPoint("TOPLEFT", 8, -8)
@@ -705,6 +956,24 @@ function S.Create()
     logo:SetPoint("TOPLEFT", 14, -14)
     logo:SetTexture(TEX .. S.ThemeById(S.themeId).mascot)
     S.mascot = logo
+
+    local moveGrip = CreateFrame("Frame", nil, host)
+    moveGrip:SetPoint("TOPLEFT", 8, -8)
+    moveGrip:SetPoint("TOPRIGHT", -8, -8)
+    moveGrip:SetHeight(76)
+    moveGrip:SetFrameLevel((host:GetFrameLevel() or 1) + 2)
+    moveGrip:EnableMouse(true)
+    moveGrip:RegisterForDrag("LeftButton")
+    moveGrip:SetScript("OnDragStart", function()
+        S.movingWindow = true
+        parent:StartMoving()
+    end)
+    moveGrip:SetScript("OnDragStop", function()
+        parent:StopMovingOrSizing()
+        S.movingWindow = nil
+        SaveWindow(parent)
+    end)
+    S.moveGrip = moveGrip
 
     local title = host:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("LEFT", logo, "RIGHT", 10, 8)
@@ -761,6 +1030,7 @@ function S.Create()
     tray:EnableMouse(true)
     tray:Hide()
     S.tray = tray
+    S.RegisterFontRoot(tray)
 
     S.swatches = {}
     for i = 1, #S.THEMES do
@@ -789,11 +1059,32 @@ function S.Create()
     end)
     themeBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
+    local uiToggle = S.CuteButton(UIParent, 88, 28, "Default UI")
+    uiToggle:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -176, -16)
+    uiToggle:SetFrameStrata(host:GetFrameStrata())
+    uiToggle:SetFrameLevel((host:GetFrameLevel() or 1) + 40)
+    uiToggle:SetScript("OnClick", function()
+        S.SetCustomUI(not S.customMode)
+    end)
+    uiToggle:SetScript("OnEnter", function(self)
+        Tint(self.bg, C.btnHi)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:SetText(S.customMode and "Show Peloria auction house" or "Show qtEasyAuction")
+        GameTooltip:Show()
+    end)
+    uiToggle:SetScript("OnLeave", function(self)
+        if not self.locked then Tint(self.bg, C.btn) end
+        GameTooltip:Hide()
+    end)
+    S.uiToggle = uiToggle
+    S.RegisterFontRoot(uiToggle)
+
     local tabBar = CreateFrame("Frame", nil, host)
     tabBar:SetPoint("TOPLEFT", 12, -92)
     tabBar:SetPoint("TOPRIGHT", -12, -92)
     tabBar:SetHeight(36)
     S.tabBg = Fill(tabBar, "BACKGROUND", C.panel)
+    S.tabBar = tabBar
 
     S.tabs = {}
     local specs = {
@@ -803,10 +1094,8 @@ function S.Create()
         { "Stats", "deals" },
         { "Settings" },
     }
-    local tabW, tabGap = 128, 136
     for i, spec in ipairs(specs) do
-        local t = S.CuteButton(tabBar, tabW, 32, spec[1], spec[2])
-        t:SetPoint("LEFT", 6 + (i - 1) * tabGap, 0)
+        local t = S.CuteButton(tabBar, 128, 32, spec[1], spec[2])
         t:SetScript("OnClick", function() ShowTab(i) end)
         S.tabs[i] = t
     end
@@ -825,6 +1114,29 @@ function S.Create()
     end
     S.pages = { deals = Page(), post = Page(), mine = Page(), stats = Page(), settings = Page() }
 
+    local resize = CreateFrame("Button", nil, host)
+    Size(resize, 20, 20)
+    resize:SetPoint("BOTTOMLEFT", 2, 2)
+    resize:SetFrameLevel((host:GetFrameLevel() or 1) + 30)
+    resize:RegisterForDrag("LeftButton")
+    resize:EnableMouse(true)
+    resize:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    resize:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+    resize:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+    local states = { resize:GetNormalTexture(), resize:GetHighlightTexture(), resize:GetPushedTexture() }
+    for i = 1, #states do states[i]:SetTexCoord(1, 0, 0, 1) end
+    resize:SetScript("OnDragStart", function()
+        S.sizingWindow = true
+        parent:StartSizing("BOTTOMLEFT")
+    end)
+    resize:SetScript("OnDragStop", function()
+        parent:StopMovingOrSizing()
+        S.sizingWindow = nil
+        SaveWindow(parent)
+        RefreshLayout()
+    end)
+    S.resizeGrip = resize
+
     local empty = S.pages.deals:CreateTexture(nil, "BACKGROUND")
     Size(empty, 128, 128)
     empty:SetPoint("CENTER", 0, 24)
@@ -837,9 +1149,14 @@ function S.Create()
     S.emptyText = emptyFs
 
     ShowTab(1, true)
-    host:Show()
+    host:SetScript("OnSizeChanged", function()
+        if S.sizingWindow then SaveWindow(parent) end
+        RefreshLayout()
+    end)
+    RefreshLayout()
     S.host = host
     S.Apply(S.themeId)
+    ApplyDisplayMode(parent)
     if _G.qtEasyAuctionDeals and _G.qtEasyAuctionDeals.OnShown then
         _G.qtEasyAuctionDeals.OnShown()
     end
@@ -861,24 +1178,25 @@ function S.Attach()
     if not parent._qtEasySkinHooked then
         parent._qtEasySkinHooked = true
         pcall(parent.HookScript, parent, "OnShow", function()
+            S.geometryApplied = nil
             local ok, err = pcall(S.Create)
             if not ok then
                 print("|cffff5555qtEasyAuction:|r skin error: " .. tostring(err))
-            elseif S.host then
-                S.host:Show()
             end
         end)
         pcall(parent.HookScript, parent, "OnHide", function()
+            if S.customMode then SaveWindow(parent) end
+            S.geometryApplied = nil
+            parent:SetAlpha(S.nativeAlpha or 1)
             if S.tray then S.tray:Hide() end
             if S.host then S.host:Hide() end
+            if S.uiToggle then S.uiToggle:Hide() end
         end)
     end
     if parent:IsShown() then
         local ok, err = pcall(S.Create)
         if not ok then
             print("|cffff5555qtEasyAuction:|r skin error: " .. tostring(err))
-        elseif S.host then
-            S.host:Show()
         end
     end
 end

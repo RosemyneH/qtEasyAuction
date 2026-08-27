@@ -657,6 +657,8 @@ local function CreatePanel()
     confirm:SetFrameLevel((panel:GetFrameLevel() or 1) + 80)
     confirm:SetToplevel(true)
     confirm:EnableMouse(true)
+    local Skin = _G.qtEasyAuctionSkin
+    if Skin and Skin.RegisterFontRoot then Skin.RegisterFontRoot(confirm) end
     confirm:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -896,7 +898,8 @@ local function CreatePanel()
 end
 
 function A.ApplySkin()
-    local pal = _G.qtEasyAuctionSkin and _G.qtEasyAuctionSkin.C and _G.qtEasyAuctionSkin.C()
+    local Skin = _G.qtEasyAuctionSkin
+    local pal = Skin and Skin.C and Skin.C()
     if not pal then return end
     if A.headBg then A.headBg:SetVertexColor(pal.head[1], pal.head[2], pal.head[3], pal.head[4] or 1) end
     if A.headLine then A.headLine:SetVertexColor(pal.accent[1], pal.accent[2], pal.accent[3], 0.9) end
@@ -912,6 +915,14 @@ function A.ApplySkin()
     end
     if A.confirmText then A.confirmText:SetTextColor(pal.cream[1], pal.cream[2], pal.cream[3]) end
     if A.RefreshHeads then A.RefreshHeads() end
+    Paint()
+    if Skin.ApplyTypography then
+        if A.panel then Skin.ApplyTypography(A.panel) end
+        if A.confirm then Skin.ApplyTypography(A.confirm) end
+    end
+end
+
+function A.RefreshLayout()
     Paint()
 end
 

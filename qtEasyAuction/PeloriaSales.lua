@@ -920,6 +920,13 @@ end
 
 function T.ApplySkin()
     PaintPanel()
+    local Skin = _G.qtEasyAuctionSkin
+    if Skin and Skin.ApplyTypography and T.panel then Skin.ApplyTypography(T.panel) end
+end
+
+function T.RefreshLayout()
+    LayoutPanel()
+    PaintPanel()
 end
 
 function T.OnShown()

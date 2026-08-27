@@ -8,9 +8,18 @@ local offset = 0
 local function DB()
     qtEasyAuctionDB = qtEasyAuctionDB or {}
     qtEasyAuctionDB.hiddenSellers = qtEasyAuctionDB.hiddenSellers or {}
-    qtEasyAuctionDB.bulkBuyDelay = tonumber(qtEasyAuctionDB.bulkBuyDelay) or 0.10
+    if qtEasyAuctionDB.bulkBuyVersion ~= 1 then
+        if qtEasyAuctionDB.bulkBuyDelay == nil or qtEasyAuctionDB.bulkBuyDelay == 0.10 then
+            qtEasyAuctionDB.bulkBuyDelay = 0.05
+        end
+        qtEasyAuctionDB.bulkBuyStep = nil
+        qtEasyAuctionDB.bulkBuyVersion = 1
+    end
+    qtEasyAuctionDB.bulkBuyDelay = tonumber(qtEasyAuctionDB.bulkBuyDelay) or 0.05
     if qtEasyAuctionDB.confirmMassBuy == nil then qtEasyAuctionDB.confirmMassBuy = true end
     if qtEasyAuctionDB.hideDuplicateDeals == nil then qtEasyAuctionDB.hideDuplicateDeals = true end
+    if qtEasyAuctionDB.hideLowValueDeals == nil then qtEasyAuctionDB.hideLowValueDeals = true end
+    qtEasyAuctionDB.minimumDealGold = math.max(0, tonumber(qtEasyAuctionDB.minimumDealGold) or 30)
     return qtEasyAuctionDB
 end
 
@@ -31,7 +40,11 @@ end
 local function Paint()
     if not T.rows then return end
     local hidden = Hidden()
-    local maxOffset = math.max(0, #hidden - ROW_MAX)
+    local visible = ROW_MAX
+    if T.list and T.list:GetHeight() and T.list:GetHeight() > 0 then
+        visible = math.max(1, math.min(ROW_MAX, math.floor(T.list:GetHeight() / ROW_H)))
+    end
+    local maxOffset = math.max(0, #hidden - visible)
     offset = math.max(0, math.min(offset, maxOffset))
     if T.bar then
         T.bar:SetMinMaxValues(0, maxOffset)
@@ -49,10 +62,26 @@ local function Paint()
         if T.duplicates.SetOn then T.duplicates:SetOn(DB().hideDuplicateDeals)
         else T.duplicates:SetChecked(DB().hideDuplicateDeals) end
     end
+    if T.lowValue then
+        if T.lowValue.SetOn then T.lowValue:SetOn(DB().hideLowValueDeals)
+        else T.lowValue:SetChecked(DB().hideLowValueDeals) end
+    end
+    if T.minimumDealGold and not T.minimumDealGold:HasFocus() then
+        T.minimumDealGold:SetText(tostring(DB().minimumDealGold))
+    end
+    if T.font then
+        local Skin = _G.qtEasyAuctionSkin
+        UIDropDownMenu_SetText(T.font, Skin and Skin.FontName and Skin.FontName() or "Default")
+    end
+    if T.fontSize then
+        local Skin = _G.qtEasyAuctionSkin
+        local scale = Skin and Skin.FontScale and Skin.FontScale() or 1
+        T.fontSize:SetText(string.format("%d%%", math.floor(scale * 100 + 0.5)))
+    end
     for i = 1, ROW_MAX do
         local row = T.rows[i]
         local seller = hidden[offset + i]
-        if seller then
+        if seller and i <= visible then
             row.key = seller.key
             row.name:SetText(seller.name)
             row:Show()
@@ -101,12 +130,12 @@ local function CreatePanel()
     detail:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
     detail:SetWidth(520)
     detail:SetJustifyH("LEFT")
-    detail:SetText("Purchases wait for the server to confirm each listing before sending the next.")
+    detail:SetText("Send one listing each interval; results continue arriving in the background.")
     T.detail = detail
 
     local delayLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     delayLabel:SetPoint("TOPLEFT", detail, "BOTTOMLEFT", 0, -18)
-    delayLabel:SetText("Delay after confirmation")
+    delayLabel:SetText("Buy interval")
     T.delayLabel = delayLabel
 
     local delayWrap
@@ -188,8 +217,135 @@ local function CreatePanel()
     end
     T.duplicates = duplicates
 
+    local dealsTitle = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    dealsTitle:SetPoint("TOPLEFT", 18, -108)
+    dealsTitle:SetText("Deals filtering")
+    T.dealsTitle = dealsTitle
+
+    local lowValue
+    if Skin and Skin.Chip then
+        lowValue = Skin.Chip(panel, 148, 28, "Hide deals under", true)
+        lowValue:SetPoint("LEFT", dealsTitle, "RIGHT", 18, 0)
+        lowValue.OnToggle = function(self, on)
+            DB().hideLowValueDeals = on and true or false
+            self:SetOn(DB().hideLowValueDeals)
+            RefreshDeals()
+        end
+        lowValue:SetOn(DB().hideLowValueDeals)
+    else
+        lowValue = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+        lowValue:SetPoint("LEFT", dealsTitle, "RIGHT", 18, 0)
+        local label = lowValue:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        label:SetPoint("LEFT", lowValue, "RIGHT", 2, 0)
+        label:SetText("Hide deals under")
+        lowValue:SetChecked(DB().hideLowValueDeals)
+        lowValue:SetScript("OnClick", function(self)
+            DB().hideLowValueDeals = self:GetChecked() and true or false
+            RefreshDeals()
+        end)
+        lowValue.label = label
+    end
+    T.lowValue = lowValue
+
+    local minimumWrap
+    local minimumDealGold
+    if Skin and Skin.Field then
+        minimumWrap = Skin.Field(panel, 72, 28, "qtEasyAuctionMinimumDealGold")
+        minimumWrap:SetPoint("LEFT", lowValue, "RIGHT", 8, 0)
+        minimumDealGold = minimumWrap.box
+    else
+        minimumDealGold = CreateFrame("EditBox", "qtEasyAuctionMinimumDealGold", panel, "InputBoxTemplate")
+        minimumDealGold:SetWidth(64)
+        minimumDealGold:SetHeight(24)
+        minimumDealGold:SetPoint("LEFT", lowValue, "RIGHT", 8, 0)
+        minimumDealGold:SetAutoFocus(false)
+    end
+    minimumDealGold:SetMaxLetters(9)
+    minimumDealGold:SetText(tostring(DB().minimumDealGold))
+    local function SaveMinimumDealGold(self)
+        local value = tonumber(self:GetText())
+        if value then DB().minimumDealGold = math.max(0, math.min(100000000, value)) end
+        self:SetText(tostring(DB().minimumDealGold))
+        RefreshDeals()
+    end
+    minimumDealGold:SetScript("OnEnterPressed", function(self) SaveMinimumDealGold(self); self:ClearFocus() end)
+    minimumDealGold:SetScript("OnEditFocusLost", SaveMinimumDealGold)
+    minimumDealGold:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    T.minimumDealGold = minimumDealGold
+    T.minimumWrap = minimumWrap
+
+    local minimumGoldLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+    minimumGoldLabel:SetPoint("LEFT", minimumWrap or minimumDealGold, "RIGHT", 8, 0)
+    minimumGoldLabel:SetText("gold")
+    T.minimumGoldLabel = minimumGoldLabel
+
+    local appearanceTitle = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    appearanceTitle:SetPoint("TOPLEFT", 18, -154)
+    appearanceTitle:SetText("Appearance")
+    T.appearanceTitle = appearanceTitle
+
+    local fontLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    fontLabel:SetPoint("TOPLEFT", 18, -192)
+    fontLabel:SetText("Font")
+    T.fontLabel = fontLabel
+
+    local font = CreateFrame("Frame", "qtEasyAuctionFontDropdown", panel, "UIDropDownMenuTemplate")
+    font:SetPoint("LEFT", fontLabel, "RIGHT", 0, -2)
+    UIDropDownMenu_SetWidth(font, 180)
+    UIDropDownMenu_JustifyText(font, "LEFT")
+    UIDropDownMenu_Initialize(font, function(_, level)
+        if level ~= 1 or not Skin or not Skin.FontNames or not Skin.SetFont then return end
+        local names = Skin.FontNames()
+        local current = Skin.FontName()
+        for i = 1, #names do
+            local fontName = names[i]
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = fontName
+            info.checked = fontName == current
+            info.func = function()
+                Skin.SetFont(fontName)
+                UIDropDownMenu_SetText(font, fontName)
+                CloseDropDownMenus()
+                Paint()
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+    UIDropDownMenu_SetText(font, Skin and Skin.FontName and Skin.FontName() or "Default")
+    T.font = font
+
+    local sizeLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    sizeLabel:SetPoint("LEFT", font, "RIGHT", 2, 2)
+    sizeLabel:SetText("Size")
+    T.sizeLabel = sizeLabel
+
+    local smaller = Cute(panel, 28, 28, "−")
+    smaller:SetPoint("LEFT", sizeLabel, "RIGHT", 8, 0)
+    local fontSize = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    fontSize:SetPoint("LEFT", smaller, "RIGHT", 8, 0)
+    fontSize:SetWidth(44)
+    fontSize:SetJustifyH("CENTER")
+    local larger = Cute(panel, 28, 28, "+")
+    larger:SetPoint("LEFT", fontSize, "RIGHT", 8, 0)
+    smaller:SetScript("OnClick", function()
+        if Skin and Skin.SetFontScale then Skin.SetFontScale((Skin.FontScale and Skin.FontScale() or 1) - 0.05) end
+        Paint()
+    end)
+    larger:SetScript("OnClick", function()
+        if Skin and Skin.SetFontScale then Skin.SetFontScale((Skin.FontScale and Skin.FontScale() or 1) + 0.05) end
+        Paint()
+    end)
+    T.smaller, T.fontSize, T.larger = smaller, fontSize, larger
+
+    local resetWindow = Cute(panel, 112, 28, "Reset window")
+    resetWindow:SetPoint("TOPRIGHT", -18, -178)
+    resetWindow:SetScript("OnClick", function()
+        if Skin and Skin.ResetWindow then Skin.ResetWindow() end
+    end)
+    T.resetWindow = resetWindow
+
     local hiddenTitle = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    hiddenTitle:SetPoint("TOPLEFT", 18, -126)
+    hiddenTitle:SetPoint("TOPLEFT", 18, -240)
     hiddenTitle:SetText("Hidden sellers")
     T.hiddenTitle = hiddenTitle
 
@@ -198,7 +354,7 @@ local function CreatePanel()
     T.hiddenCount = hiddenCount
 
     local clear = Cute(panel, 100, 28, "Show all")
-    clear:SetPoint("TOPRIGHT", -18, -118)
+    clear:SetPoint("TOPRIGHT", -18, -232)
     clear:SetScript("OnClick", function()
         DB().hiddenSellers = {}
         offset = 0
@@ -213,7 +369,7 @@ local function CreatePanel()
     T.hint = hint
 
     local list = CreateFrame("Frame", nil, panel)
-    list:SetPoint("TOPLEFT", 18, -176)
+    list:SetPoint("TOPLEFT", 18, -290)
     list:SetPoint("BOTTOMRIGHT", -38, 12)
     T.list = list
     T.rows = {}
@@ -241,7 +397,7 @@ local function CreatePanel()
     end
 
     local bar = CreateFrame("Slider", "qtEasyAuctionSettingsBar", panel, "UIPanelScrollBarTemplate")
-    bar:SetPoint("TOPRIGHT", -12, -176)
+    bar:SetPoint("TOPRIGHT", -12, -290)
     bar:SetPoint("BOTTOMRIGHT", -12, 12)
     bar:SetValueStep(1)
     bar:SetScript("OnValueChanged", function(_, value)
@@ -264,26 +420,35 @@ function T.ApplySkin()
     local Skin = _G.qtEasyAuctionSkin
     local pal = Skin and Skin.C and Skin.C()
     if not pal then return end
-    local labels = { T.title, T.hiddenTitle }
+    local labels = { T.title, T.dealsTitle, T.appearanceTitle, T.hiddenTitle }
     for i = 1, #labels do
         if labels[i] then labels[i]:SetTextColor(pal.cream[1], pal.cream[2], pal.cream[3]) end
     end
-    local muted = { T.detail, T.seconds, T.hiddenCount, T.hint }
+    local muted = { T.detail, T.seconds, T.minimumGoldLabel, T.hiddenCount, T.hint }
     for i = 1, #muted do
         if muted[i] then muted[i]:SetTextColor(pal.mute[1], pal.mute[2], pal.mute[3]) end
     end
     if T.delayLabel then T.delayLabel:SetTextColor(pal.cream[1], pal.cream[2], pal.cream[3]) end
+    if T.fontLabel then T.fontLabel:SetTextColor(pal.cream[1], pal.cream[2], pal.cream[3]) end
+    if T.sizeLabel then T.sizeLabel:SetTextColor(pal.cream[1], pal.cream[2], pal.cream[3]) end
+    if T.fontSize then T.fontSize:SetTextColor(pal.gold[1], pal.gold[2], pal.gold[3]) end
     if T.confirm and T.confirm.PaintTheme then T.confirm:PaintTheme() end
     if T.duplicates and T.duplicates.PaintTheme then T.duplicates:PaintTheme() end
+    if T.lowValue and T.lowValue.PaintTheme then T.lowValue:PaintTheme() end
     for i = 1, #(T.rows or {}) do
         local tint = (i % 2 == 0) and pal.rowA or pal.rowB
         T.rows[i].bg:SetVertexColor(tint[1], tint[2], tint[3], tint[4] or 1)
     end
+    if Skin and Skin.ApplyTypography then Skin.ApplyTypography(T.panel) end
 end
 
 function T.OnShown()
     CreatePanel()
     if T.panel then T.panel:Show() end
     T.ApplySkin()
+    Paint()
+end
+
+function T.RefreshLayout()
     Paint()
 end
